@@ -16,6 +16,7 @@
     "pixi.js": "8.22.0"
   },
   "devDependencies": {
+    "@esotericsoftware/spine-core": "^4.1.56",
     "sharp": "^0.35.5",
     "typescript": "5.9.3",
     "vite": "7.3.7"
