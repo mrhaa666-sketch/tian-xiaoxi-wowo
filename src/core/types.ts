@@ -51,15 +51,74 @@ export const EMOTION_CN: Record<Emotion, string> = {
 export interface Needs {
   hunger: number;  // 饱腹，0 = 饿坏了
   energy: number;  // 精力
-  mood: number;    // 心情
+  bladder: number; // 如厕，0 = 憋不住了
   hygiene: number; // 清洁
+  fun: number;     // 娱乐
   social: number;  // 社交满足
+  comfort: number; // 舒适（一直站着、走着会累）
+  mood: number;    // 心情（由其他状态综合而来）
   health: number;  // 健康
 }
 
 export const NEED_CN: Record<keyof Needs, string> = {
-  hunger: "饱腹", energy: "精力", mood: "心情", hygiene: "清洁", social: "社交", health: "健康",
+  hunger: "饱腹", energy: "精力", bladder: "如厕", hygiene: "清洁", fun: "娱乐",
+  social: "社交", comfort: "舒适", mood: "心情", health: "健康",
 };
+
+/** 界面上需求条的顺序（心情单独显示） */
+export const NEED_ORDER: (keyof Needs)[] = ["hunger", "energy", "bladder", "hygiene", "fun", "social", "comfort", "health"];
+
+/** 性格五维，0～100。0 偏向左边的词，100 偏向右边的词 */
+export interface Traits {
+  extraversion: number;      // 内向 ↔ 外向：越外向，越需要社交
+  conscientiousness: number; // 随性 ↔ 认真：越认真，工作压力越小、越守作息
+  agreeableness: number;     // 直率 ↔ 友善：越友善，越不容易和人起冲突
+  neuroticism: number;       // 淡定 ↔ 敏感：越敏感，压力涨得越快
+  openness: number;          // 保守 ↔ 好奇：越好奇，越需要娱乐、学东西越快
+}
+
+export const TRAIT_CN: Record<keyof Traits, [string, string, string]> = {
+  extraversion: ["外向", "内向", "外向"],
+  conscientiousness: ["认真", "随性", "认真"],
+  agreeableness: ["友善", "直率", "友善"],
+  neuroticism: ["敏感", "淡定", "敏感"],
+  openness: ["好奇", "保守", "好奇"],
+};
+
+/** 技能等级 0～10（小数部分是升级进度） */
+export interface Skills {
+  cooking: number;
+  music: number;
+  art: number;
+  gaming: number;
+  study: number;
+  fitness: number;
+}
+
+export const SKILL_CN: Record<keyof Skills, string> = {
+  cooking: "做饭", music: "音乐", art: "画画", gaming: "游戏", study: "学习", fitness: "运动",
+};
+
+export interface Profile {
+  age: number;
+  birthday: string;  // "MM-DD"，当天会过生日
+  job: string;
+  hobbies: string;
+  likes: string[];    // 喜欢的食物 id
+  dislikes: string[]; // 讨厌的食物 id
+}
+
+/** 今天的记录，每天零点清空 */
+export interface DayStats {
+  date: string;
+  meals: number;
+  sleepMin: number;
+  workMin: number;
+  funMin: number;
+  socialMin: number;
+  toilet: number;
+  showered: boolean;
+}
 
 export interface Illness {
   name: string;     // 感冒、发烧、肚子疼
@@ -111,7 +170,13 @@ export interface CharacterData {
   persona: string;  // 性格 / 人设提示词
   schedule: string; // 玩家写的作息表
   appearance: Appearance;
+  profile: Profile;
+  traits: Traits;
+  skills: Skills;
   needs: Needs;
+  stress: number;     // 压力 0～100
+  sleepDebt: number;  // 睡眠债（小时）：前几天少睡的时间
+  today: DayStats;
   illness?: Illness;
   memories: Memory[];
   relations: Record<string, Relation>; // key 为角色 id，"player" 为主人

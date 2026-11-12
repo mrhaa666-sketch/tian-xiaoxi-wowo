@@ -1,5 +1,5 @@
 // 给 AI 的提示词和输出格式。
-import { EMOTIONS, EMOTION_CN, NEED_CN, type Needs } from "../core/types";
+import { EMOTIONS, EMOTION_CN, NEED_CN, NEED_ORDER, SKILL_CN, TRAIT_CN, type CharacterData, type Needs, type Skills, type Traits } from "../core/types";
 import { currentScheduleItem, describeNow, festivalHint, parseSchedule } from "../core/time";
 import { FOOD_BY_ID } from "../world/catalog";
 import type { Character } from "../sim/character";
@@ -100,7 +100,31 @@ export const CHAT_SYSTEM = `你在生活模拟游戏「恬小溪窝窝」里扮�
 ${ACTIONS_DOC}`;
 
 function needsLine(n: Needs) {
-  return (Object.keys(NEED_CN) as (keyof Needs)[]).map((k) => `${NEED_CN[k]} ${Math.round(n[k])}`).join("，");
+  return [...NEED_ORDER, "mood" as const].map((k) => `${NEED_CN[k]} ${Math.round(n[k])}`).join("，");
+}
+
+/** 性格五维写成一句话，例如「比较内向、非常认真」 */
+export function traitsLine(t: Traits) {
+  return (Object.keys(TRAIT_CN) as (keyof Traits)[]).map((k) => {
+    const v = t[k];
+    const [, low, high] = TRAIT_CN[k];
+    const word = v >= 50 ? high : low;
+    const deg = Math.abs(v - 50) >= 35 ? "非常" : Math.abs(v - 50) >= 15 ? "比较" : "有点";
+    return Math.abs(v - 50) < 6 ? null : `${deg}${word}`;
+  }).filter(Boolean).join("、") || "性格比较平衡";
+}
+
+function skillsLine(s: Skills) {
+  return (Object.keys(SKILL_CN) as (keyof Skills)[]).map((k) => `${SKILL_CN[k]} ${Math.floor(s[k])} 级`).join("，");
+}
+
+function profileLine(d: CharacterData) {
+  const p = d.profile;
+  const food = (ids: string[]) => ids.map((id) => FOOD_BY_ID[id]?.name).filter(Boolean).join("、");
+  return [
+    `${p.age} 岁`, p.job && `职业：${p.job}`, p.birthday && `生日：${p.birthday.replace("-", "月")}日`, p.hobbies && `爱好：${p.hobbies}`,
+    p.likes.length && `喜欢吃：${food(p.likes)}`, p.dislikes.length && `不爱吃：${food(p.dislikes)}`,
+  ].filter(Boolean).join("；");
 }
 
 function fmtAgo(t: number) {
@@ -124,7 +148,12 @@ export function buildContext(game: Game, c: Character, events: GameEvent[]) {
   lines.push(`【作息表】\n${d.schedule || "（没有作息表，按正常人的作息）"}${cur ? `\n按作息，现在大概该：${cur.text}` : ""}`);
   lines.push(`【现在】${t.date} ${t.time}（${t.period}），${t.lunar}${t.jieqi ? "，" + t.jieqi : ""}${t.weekend ? "，周末" : ""}`);
   if (game.todayFestivals.length) lines.push(`【今天的节日】${game.todayFestivals.map((f) => `${f}（${festivalHint(f)}）`).join("；")}`);
-  lines.push(`【你的状态 0-100】${needsLine(d.needs)}。心情：${EMOTION_CN[d.emotion]}`);
+  lines.push(`【基本资料】${profileLine(d)}`);
+  lines.push(`【性格】${traitsLine(d.traits)}（越外向越需要社交，越认真越守作息、工作压力越小，越敏感越容易有压力，越好奇越需要新鲜事）`);
+  lines.push(`【技能 0-10 级】${skillsLine(d.skills)}`);
+  lines.push(`【你的状态 0-100，越低越需要处理】${needsLine(d.needs)}。压力 ${Math.round(d.stress)}/100${d.sleepDebt >= 1 ? `，睡眠债 ${d.sleepDebt.toFixed(1)} 小时（前几天没睡够）` : ""}。现在的表情：${EMOTION_CN[d.emotion]}`);
+  const td = d.today;
+  lines.push(`【今天】吃了 ${td.meals} 顿，睡了 ${(td.sleepMin / 60).toFixed(1)} 小时，工作 ${(td.workMin / 60).toFixed(1)} 小时，玩了 ${(td.funMin / 60).toFixed(1)} 小时，${td.showered ? "洗过澡了" : "还没洗澡"}`);
   if (d.illness) lines.push(`【生病】${d.illness.name}，严重程度 ${Math.round(d.illness.severity)}/100。躺床休息、吃药、喝粥会好得快，带病工作会加重。`);
   lines.push(`【位置】${c.room}。正在：${d.activity}`);
   lines.push(`【主人】${game.playerWatching ? "正在看着这个家" : "现在不在"}。你对主人的好感 ${d.relations.player?.affinity ?? 0}${d.relations.player?.note ? "，印象：" + d.relations.player.note : ""}`);

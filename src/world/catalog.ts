@@ -153,7 +153,7 @@ export const FURNITURE: FurnitureDef[] = [
   },
   {
     id: "toilet", name: "马桶", w: 1, h: 1, height: 36, color: 0xf4f7f9, category: "卫浴", icon: "厕",
-    interactions: [I({ id: "use", name: "上厕所", pose: "sit", onTop: true, minutes: [2, 5], perMinute: { hygiene: -0.2, mood: 0.3 } })],
+    interactions: [I({ id: "use", name: "上厕所", pose: "sit", onTop: true, minutes: [2, 5], perMinute: { bladder: 30, hygiene: -0.2 }, tags: ["toilet"] })],
   },
   {
     id: "medicine", name: "药箱", w: 1, h: 1, height: 46, color: 0xffffff, category: "卫浴", icon: "药",

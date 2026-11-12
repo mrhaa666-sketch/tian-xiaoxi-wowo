@@ -1,6 +1,8 @@
 // 角色的运行时：需求变化、生病、执行计划（走路、用家具、说话）。
 // AI 只决定「接下来做什么」，具体怎么走、怎么用家具由这里负责。
-import type { CharacterData, Emotion, FurnitureInst, Needs, PlanStep, Pose } from "../core/types";
+import { SKILL_CN, type CharacterData, type Emotion, type FurnitureInst, type Needs, type PlanStep, type Pose, type Skills } from "../core/types";
+import { dateKey } from "../core/time";
+import { emptyDay } from "./defaults";
 import { FOOD_BY_ID, FURNITURE_BY_ID, type InteractionDef } from "../world/catalog";
 import type { Game } from "./game";
 
@@ -82,28 +84,75 @@ export class Character {
   private updateNeeds(dt: number) {
     const m = (dt * this.game.settings.timeScale) / 60; // 经过的游戏分钟
     const n = this.d.needs;
-    const resting = this.run?.phase === "act" && this.run.interaction?.tags?.includes("rest");
+    const d = this.d;
+    const t = d.traits;
+    const k = (v: number) => v / 100; // 性格值换算成 0～1
+    const acting = this.run?.phase === "act" ? this.run.interaction : undefined;
+    const tags = acting?.tags ?? [];
+    const resting = tags.includes("rest");
+    const sleeping = resting && acting?.pose === "lie";
+    const funAct = !!acting && ((acting.perMinute.mood ?? 0) >= 0.15 || tags.includes("music"));
+    this.rollDay();
+
+    // —— 随时间自然变化 ——
     n.hunger = clamp(n.hunger - 0.1 * m);
-    if (!resting) n.energy = clamp(n.energy - (this.d.illness ? 0.12 : 0.07) * m);
+    // 睡眠债越多，越容易累
+    if (!resting) n.energy = clamp(n.energy - (this.d.illness ? 0.12 : 0.07) * (1 + Math.min(d.sleepDebt, 10) * 0.05) * m);
+    n.bladder = clamp(n.bladder - 0.12 * m);
     n.hygiene = clamp(n.hygiene - 0.04 * m);
-    n.social = clamp(n.social - 0.05 * m);
+    // 越好奇越容易无聊，越外向越需要人陪
+    n.fun = clamp(n.fun - 0.06 * (0.7 + k(t.openness) * 0.6) * m);
+    n.social = clamp(n.social - 0.05 * (0.5 + k(t.extraversion)) * m);
+    // 坐着、躺着会舒服；一直站着、走路会累
+    if (acting?.pose === "sit" || acting?.pose === "lie") n.comfort = clamp(n.comfort + 0.8 * m);
+    else n.comfort = clamp(n.comfort - (this.moving ? 0.08 : 0.04) * m);
 
-    // 心情慢慢靠向「当前状态应有的心情」
-    let target = 65;
-    if (n.hunger < 30) target -= 15;
-    if (n.energy < 25) target -= 10;
-    if (n.hygiene < 30) target -= 8;
-    if (n.social < 25) target -= 8;
-    if (this.d.illness) target -= 15;
-    n.mood = clamp(n.mood + (target - n.mood) * 0.004 * m);
-
-    // 正在进行的家具交互带来的变化
-    if (this.run?.phase === "act" && this.run.interaction) {
-      for (const [k, v] of Object.entries(this.run.interaction.perMinute)) {
-        const kk = k as keyof Needs;
+    // —— 正在做的事带来的变化 ——
+    if (acting) {
+      for (const [key, v] of Object.entries(acting.perMinute)) {
+        const kk = key as keyof Needs;
         if (kk === "health") continue;
         n[kk] = clamp(n[kk] + (v as number) * m);
       }
+      if (funAct) { n.fun = clamp(n.fun + (1.2 + (acting.perMinute.mood ?? 0) * 3) * m); d.today.funMin += m; }
+      if (tags.includes("work")) d.today.workMin += m;
+      if (sleeping) d.today.sleepMin += m;
+      this.gainSkill(acting.id, tags, m);
+    }
+    if (this.moving) d.skills.fitness = Math.min(10, d.skills.fitness + 0.0015 * m);
+
+    // —— 压力：需求越差涨得越快；越敏感涨得越快；工作时越随性压力越大；玩、睡、聊天会降低 ——
+    const low = (["hunger", "energy", "bladder", "hygiene", "fun", "social", "comfort"] as (keyof Needs)[]).filter((x) => n[x] < 25).length;
+    let ds = (low * 0.03 - 0.03) * (0.6 + k(t.neuroticism) * 0.8);
+    if (tags.includes("work")) ds += 0.08 * (1.4 - k(t.conscientiousness) * 0.8);
+    if (this.d.illness) ds += 0.03;
+    if (funAct) ds -= 0.15;
+    if (resting) ds -= 0.1;
+    d.stress = clamp(d.stress + ds * m);
+
+    // —— 心情慢慢靠向「当前状态应有的心情」 ——
+    let target = 68;
+    if (n.hunger < 30) target -= 15;
+    if (n.energy < 25) target -= 10;
+    if (n.bladder < 20) target -= 12;
+    if (n.hygiene < 30) target -= 8;
+    if (n.fun < 25) target -= 8;
+    if (n.social < 25) target -= 8 * (0.5 + k(t.extraversion));
+    if (n.comfort < 20) target -= 5;
+    if (d.stress > 60) target -= (d.stress - 60) * 0.4;
+    if (d.sleepDebt > 4) target -= 6;
+    if (this.d.illness) target -= 15;
+    n.mood = clamp(n.mood + (target - n.mood) * 0.004 * m);
+
+    // 憋不住了
+    if (n.bladder <= 0) {
+      n.bladder = 60;
+      n.hygiene = clamp(n.hygiene - 40);
+      n.mood = clamp(n.mood - 25);
+      d.stress = clamp(d.stress + 20);
+      this.showEmote("💦", 4);
+      this.game.log("event", `${this.name}没来得及去厕所……`, this.id);
+      this.game.emit(this, "你没来得及去厕所，出糗了，很尴尬。", 3);
     }
 
     // 生病
@@ -131,6 +180,37 @@ export class Character {
         if (n.hunger < 20) p += 0.015;
         if (Math.random() < p) this.getSick();
       }
+    }
+  }
+
+  /** 过了零点：结算睡眠债，清空今天的记录 */
+  private rollDay() {
+    const today = dateKey(new Date());
+    const day = this.d.today;
+    if (day.date === today) return;
+    // 一晚上应该睡 7 小时，少睡的记成睡眠债，多睡可以还一点
+    this.d.sleepDebt = Math.max(0, Math.min(24, this.d.sleepDebt + (7 * 60 - day.sleepMin) / 60 * (day.sleepMin > 7 * 60 ? 0.5 : 1)));
+    this.d.today = emptyDay();
+  }
+
+  /** 做相关的事会慢慢提升技能。越好奇学得越快，等级越高升得越慢。 */
+  private gainSkill(id: string, tags: string[], m: number) {
+    const skill: keyof Skills | null =
+      tags.includes("cook") ? "cooking"
+      : tags.includes("music") ? "music"
+      : tags.includes("art") ? "art"
+      : ["game", "arcade"].includes(id) ? "gaming"
+      : ["read", "browse", "work", "compose"].includes(id) ? "study"
+      : null;
+    if (!skill) return;
+    const before = Math.floor(this.d.skills[skill]);
+    const rate = 0.004 * (1 + this.d.traits.openness / 200) / (1 + this.d.skills[skill] * 0.3);
+    this.d.skills[skill] = Math.min(10, this.d.skills[skill] + rate * m);
+    const after = Math.floor(this.d.skills[skill]);
+    if (after > before) {
+      this.showEmote("✨", 4);
+      this.game.log("event", `${this.name}的${SKILL_CN[skill]}升到了 ${after} 级`, this.id);
+      this.game.emit(this, `你的${SKILL_CN[skill]}技能提升到了 ${after} 级。`, 1);
     }
   }
 
@@ -333,6 +413,8 @@ export class Character {
           this.back = c.y < this.d.pos.y - 0.3;
         }
         if (it.turnsOn) f.state = { ...f.state, on: true };
+        if (["bath", "shower"].includes(it.id)) this.d.today.showered = true;
+        if (it.tags?.includes("toilet")) this.d.today.toilet++;
         if (f.def === "lamp" && it.id === "toggle") f.state = { ...f.state, on: !f.state?.on };
         if (step.do === "eat" || it.tags?.includes("eat")) this.consumeFood(f);
         if (it.news) this.game.deliverNews(this, FURNITURE_BY_ID[f.def].name);
@@ -381,6 +463,22 @@ export class Character {
     this.game.world.data.foods = this.game.world.data.foods.filter((x) => x !== food);
     this.d.needs.hunger = clamp(this.d.needs.hunger + (def?.hunger ?? 30));
     this.d.needs.mood = clamp(this.d.needs.mood + (def?.mood ?? 3));
+    this.d.needs.bladder = clamp(this.d.needs.bladder - 8);
+    this.d.today.meals++;
+    // 喜欢 / 讨厌的食物
+    if (this.d.profile.likes.includes(food.kind)) {
+      this.d.needs.mood = clamp(this.d.needs.mood + 12);
+      this.d.stress = clamp(this.d.stress - 8);
+      this.showEmote("😍", 3);
+      this.game.log("event", `${this.name}吃到了最喜欢的${def?.name}，特别开心`, this.id);
+      return;
+    }
+    if (this.d.profile.dislikes.includes(food.kind)) {
+      this.d.needs.mood = clamp(this.d.needs.mood - 8);
+      this.showEmote("😖", 3);
+      this.game.log("event", `${this.name}不太喜欢${def?.name}，勉强吃完了`, this.id);
+      return;
+    }
     if (this.d.illness && food.kind === "porridge") this.d.illness.severity = clamp(this.d.illness.severity - 10);
     this.showEmote("😋", 3);
     this.game.log("event", `${this.name}吃了${def?.name ?? "饭"}`, this.id);

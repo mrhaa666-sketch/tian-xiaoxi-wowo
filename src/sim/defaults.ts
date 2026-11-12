@@ -1,5 +1,6 @@
 // 新存档的默认数据：两个示例角色、默认设置。
-import type { Appearance, CharacterData, Settings } from "../core/types";
+import type { Appearance, CharacterData, DayStats, Needs, Profile, Settings, Skills, Traits } from "../core/types";
+import { dateKey } from "../core/time";
 
 export const PERSONA_TEMPLATE = `（写下这个角色是什么样的人，AI 会按这段文字扮演 TA）
 例：
@@ -32,13 +33,17 @@ export function randomAppearance(): Appearance {
   };
 }
 
+export const emptyDay = (): DayStats => ({ date: dateKey(new Date()), meals: 0, sleepMin: 0, workMin: 0, funMin: 0, socialMin: 0, toilet: 0, showered: false });
+const defaultTraits = (): Traits => ({ extraversion: 50, conscientiousness: 50, agreeableness: 50, neuroticism: 50, openness: 50 });
+const defaultSkills = (): Skills => ({ cooking: 1, music: 0, art: 0, gaming: 1, study: 1, fitness: 1 });
+const defaultProfile = (): Profile => ({ age: 20, birthday: "", job: "", hobbies: "", likes: [], dislikes: [] });
+
 export function newCharacter(partial: Partial<CharacterData> & { name: string }): CharacterData {
-  return {
+  return normalizeCharacter({
     id: "c_" + Math.random().toString(36).slice(2, 9),
     persona: "",
     schedule: "",
     appearance: randomAppearance(),
-    needs: { hunger: 80, energy: 80, mood: 70, hygiene: 85, social: 60, health: 100 },
     memories: [],
     relations: { player: { affinity: 30, note: "照顾我的人" } },
     chat: [],
@@ -49,7 +54,20 @@ export function newCharacter(partial: Partial<CharacterData> & { name: string })
     activity: "发呆",
     createdAt: Date.now(),
     ...partial,
-  };
+  } as CharacterData);
+}
+
+/** 补齐缺少的字段（旧存档、新加的变量） */
+export function normalizeCharacter(d: CharacterData): CharacterData {
+  d.profile = { ...defaultProfile(), ...d.profile };
+  d.traits = { ...defaultTraits(), ...d.traits };
+  d.skills = { ...defaultSkills(), ...d.skills };
+  const base: Needs = { hunger: 80, energy: 80, bladder: 80, hygiene: 85, fun: 70, social: 60, comfort: 70, mood: 70, health: 100 };
+  d.needs = Object.assign(base, d.needs);
+  d.stress ??= 20;
+  d.sleepDebt ??= 0;
+  d.today ??= emptyDay();
+  return d;
 }
 
 export function sampleCharacters(): CharacterData[] {
@@ -63,6 +81,9 @@ export function sampleCharacters(): CharacterData[] {
     schedule: SCHEDULE_TEMPLATE,
     pos: { x: 1.5, y: 8.5 },
     appearance: { skin: "#ffe0cc", hair: "#6b4532", hairStyle: 1, outfit: "#9fd3a8", accent: "#ffffff", eyes: "#3a5a7a" },
+    profile: { age: 20, birthday: "03-14", job: "自由插画师", hobbies: "画画、给植物浇水、下雨天发呆", likes: ["cake", "pudding", "tea"], dislikes: ["curry"] },
+    traits: { extraversion: 30, conscientiousness: 85, agreeableness: 70, neuroticism: 60, openness: 65 },
+    skills: { cooking: 2, music: 1, art: 6.5, gaming: 1, study: 4, fitness: 1.5 },
   });
   const b = newCharacter({
     name: "阿槐",
@@ -82,6 +103,9 @@ export function sampleCharacters(): CharacterData[] {
 01:00 睡觉`,
     pos: { x: 5.5, y: 8.5 },
     appearance: { skin: "#f6d2b8", hair: "#2d3142", hairStyle: 0, outfit: "#f7c873", accent: "#2d3142", eyes: "#2d2a32" },
+    profile: { age: 21, birthday: "08-02", job: "大学生", hobbies: "打游戏、做饭、看新闻发表奇怪的看法", likes: ["ramen", "curry", "dumplings"], dislikes: ["porridge"] },
+    traits: { extraversion: 85, conscientiousness: 30, agreeableness: 60, neuroticism: 25, openness: 70 },
+    skills: { cooking: 5, music: 2, art: 0.5, gaming: 7, study: 2.5, fitness: 3 },
   });
   a.relations[b.id] = { affinity: 25, note: "吵闹的室友" };
   b.relations[a.id] = { affinity: 35, note: "认真过头的室友" };

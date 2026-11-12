@@ -5,7 +5,7 @@ import { FESTIVAL_FOODS, FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
 import { buildStarterHouse } from "../world/presets";
 import { World, uid } from "../world/world";
 import { Character, clamp } from "./character";
-import { defaultSettings, sampleCharacters } from "./defaults";
+import { defaultSettings, normalizeCharacter, sampleCharacters } from "./defaults";
 
 const SAVE_KEY = "wowo-save-v1";
 
@@ -121,6 +121,7 @@ export class Game {
   // ———————————————————— 角色 ————————————————————
 
   addCharacter(d: CharacterData, announce = true) {
+    normalizeCharacter(d);
     // 放到可以站的地方
     if (!this.world.walkable(Math.floor(d.pos.x), Math.floor(d.pos.y))) {
       const t = this.world.randomTileIn();
@@ -186,6 +187,7 @@ export class Game {
     this.log("say", `对${to.name}：${line}`, from.id);
     from.d.needs.social = clamp(from.d.needs.social + 6);
     to.d.needs.social = clamp(to.d.needs.social + 4);
+    for (const c of [from, to]) { c.d.today.socialMin += 1; c.d.stress = clamp(c.d.stress - 2 * (0.5 + c.d.traits.extraversion / 100)); }
     // 限制连续对话的轮数，避免两个角色无止境地聊下去、把额度用光
     const pair = [from.id, to.id].sort().join("|");
     const now = Date.now();
@@ -296,9 +298,13 @@ export class Game {
     const tables = this.world.data.furniture.filter((f) => f.def === "table");
     const t = tables[0];
     if (!t) return;
-    const kind = c.d.illness ? "porridge" : Math.random() < 0.5 ? "noodle" : "rice";
+    // 做饭技能越高，能做的菜越多，也越好吃
+    const lv = c.d.skills.cooking;
+    const menu = lv >= 6 ? ["curry", "ramen", "dumplings", "noodle"] : lv >= 3 ? ["noodle", "curry", "onigiri", "rice"] : ["rice", "onigiri", "bread"];
+    const kind = c.d.illness ? "porridge" : menu[Math.floor(Math.random() * menu.length)];
     this.world.data.foods.push({ uid: uid("food"), kind, furniture: t.uid, x: t.x, y: t.y });
-    this.log("event", `${c.name}做好了${FOOD_BY_ID[kind].name}`, c.id);
+    const praise = lv >= 6 ? "，闻起来特别香" : lv < 2 ? "，看起来有点焦" : "";
+    this.log("event", `${c.name}做好了${FOOD_BY_ID[kind].name}${praise}`, c.id);
     for (const o of this.chars) if (o !== c) this.emit(o, `${c.name}做好了${FOOD_BY_ID[kind].name}，放在餐桌上。`, 1);
   }
 
@@ -329,6 +335,9 @@ export class Game {
       n.energy = clamp(n.energy + (minutes > 360 ? 40 : -minutes * 0.03), 15);
       n.hygiene = clamp(n.hygiene - minutes * 0.02, 20);
       n.social = clamp(n.social - minutes * 0.03, 10);
+      n.bladder = clamp(n.bladder + 30, 0, 100); // 离开期间去过厕所
+      n.fun = clamp(n.fun - minutes * 0.02, 20);
+      n.comfort = clamp(n.comfort + 20);
       this.emit(c, `主人离开了大约${Math.round(minutes / 60)}小时，刚刚回来。`, 2);
     }
     this.log("system", `你离开了大约 ${(minutes / 60).toFixed(1)} 小时`);
@@ -396,6 +405,19 @@ export class Game {
       for (const c of this.chars) this.emit(c, `今天是${f}（${festivalHint(f)}）。`, 2);
       this.serveFestivalFood(f);
     }
+    // 生日
+    const md = today.slice(5);
+    for (const c of this.chars) {
+      const k = `birthday:${c.id}`;
+      if (c.d.profile.birthday !== md || this.firedFestivals[k] === today) continue;
+      this.firedFestivals[k] = today;
+      this.log("festival", `今天是${c.name}的生日！`);
+      this.emit(c, "今天是你的生日。", 3);
+      for (const o of this.chars) if (o !== c) this.emit(o, `今天是${c.name}的生日，可以去祝福 TA。`, 2);
+      const table = this.world.data.furniture.find((f) => FURNITURE_BY_ID[f.def].interactions.some((i) => i.tags?.includes("eat")));
+      if (table) this.world.data.foods.push({ uid: uid("food"), kind: "birthday_cake", furniture: table.uid, x: table.x, y: table.y, forChar: c.id });
+    }
+
     // 作息提醒：时间点到了（或刚过去 3 分钟内）就提醒一次
     const nowMin = now.getHours() * 60 + now.getMinutes();
     for (const c of this.chars) {

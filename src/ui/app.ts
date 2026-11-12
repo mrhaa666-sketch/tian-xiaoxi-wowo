@@ -2,7 +2,7 @@
 // 角色详情、建造、动态从底部弹出（抽屉）；聊天、设置、编辑角色是全屏页面。
 // 电脑上运行时，整个游戏显示在屏幕中央一个手机大小的框里。
 import type { Brain } from "../ai/brain";
-import { EMOTION_CN, NEED_CN, type CharacterData, type Needs } from "../core/types";
+import { EMOTION_CN, NEED_CN, NEED_ORDER, SKILL_CN, TRAIT_CN, type CharacterData, type Needs, type Skills, type Traits } from "../core/types";
 import { describeNow, hhmm } from "../core/time";
 import type { Character } from "../sim/character";
 import { PERSONA_TEMPLATE, SCHEDULE_TEMPLATE, defaultSettings, newCharacter, randomAppearance } from "../sim/defaults";
@@ -15,7 +15,8 @@ import { Planner } from "./planner";
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 const NEED_COLORS: Record<keyof Needs, string> = {
-  hunger: "#f08a6c", energy: "#6b9bf2", mood: "#f2c14e", hygiene: "#4fc1c9", social: "#c08ae0", health: "#5cc58a",
+  hunger: "#f08a6c", energy: "#6b9bf2", bladder: "#e3b23c", hygiene: "#4fc1c9", fun: "#f28ab8",
+  social: "#c08ae0", comfort: "#8fb86b", mood: "#f2c14e", health: "#5cc58a",
 };
 
 const hexColor = (n: number) => "#" + n.toString(16).padStart(6, "0");
@@ -58,7 +59,7 @@ export class UI {
   root: HTMLElement;
   stage: HTMLElement;
   selected: string | null = null;
-  tab: "status" | "relations" | "memory" = "status";
+  tab: "status" | "profile" | "relations" | "memory" = "status";
   build: BuildState = { on: false, tool: "furniture", floor: "wood", wallStyle: "cream", furniture: "sofa", room: "bedroom", roomName: "新房间", rot: 0, autoWalls: true };
   furnCat = "卧室";
   sheet: Sheet = null;
@@ -275,7 +276,7 @@ export class UI {
       if (th) th.textContent = c.d.thought || "……";
       return;
     }
-    const tabs = [["status", "状态"], ["relations", "关系"], ["memory", "记忆"]] as const;
+    const tabs = [["status", "状态"], ["profile", "档案"], ["relations", "关系"], ["memory", "记忆"]] as const;
     body.innerHTML = `
       <div class="d-head">${this.avatar(c.d, 52)}
         <div class="d-title"><h2>${esc(c.name)}</h2><div class="sub" id="head-sub"></div></div>
@@ -304,6 +305,8 @@ export class UI {
         <div class="minor"><button class="btn small" id="act-sick">让TA生病（测试）</button><button class="btn small danger" id="act-del">让TA搬走</button></div>`;
       $("#act-sick").onclick = () => c.getSick();
       $("#act-del").onclick = () => this.confirm(`确定要让${c.name}搬走吗？TA的记忆和聊天记录会一起删除。`, () => { this.game.removeCharacter(c.id); this.select(null); this.renderRoster(); });
+    } else if (this.tab === "profile") {
+      tb.innerHTML = this.profileHtml(c);
     } else if (this.tab === "relations") {
       const rows = Object.entries(c.d.relations).map(([id, r]) => {
         const who = id === "player" ? "主人（你）" : this.game.byId(id)?.name ?? "（已搬走）";
@@ -321,13 +324,55 @@ export class UI {
   }
 
   private statusLive(c: Character) {
-    const needs = (Object.keys(NEED_CN) as (keyof Needs)[]).map((k) => {
-      const v = Math.round(c.d.needs[k]);
-      return `<div class="need"><span>${NEED_CN[k]}</span><span class="bar"><b style="width:${v}%;background:${NEED_COLORS[k]}"></b></span><span class="v">${v}</span></div>`;
-    }).join("");
-    const ill = c.d.illness ? `<div class="sick">🤒 ${esc(c.d.illness.name)}，严重程度 ${Math.round(c.d.illness.severity)}。躺床休息、吃药、喝粥会好得快。</div>` : "";
+    const d = c.d;
+    const bar = (label: string, v: number, color: string, extra = "") =>
+      `<div class="need"><span>${label}</span><span class="bar"><b style="width:${Math.max(0, Math.min(100, v))}%;background:${color}"></b></span><span class="v">${extra || Math.round(v)}</span></div>`;
+    const needs = NEED_ORDER.map((k) => bar(NEED_CN[k], d.needs[k], NEED_COLORS[k])).join("");
+    const mood = d.needs.mood;
+    const moodWord = mood >= 80 ? "很开心" : mood >= 60 ? "不错" : mood >= 40 ? "一般" : mood >= 20 ? "低落" : "很糟";
+    const stressWord = d.stress >= 70 ? "压力很大" : d.stress >= 40 ? "有点压力" : "放松";
+    const ill = d.illness ? `<div class="sick">🤒 ${esc(d.illness.name)}，严重程度 ${Math.round(d.illness.severity)}。躺床休息、吃药、喝粥会好得快。</div>` : "";
+    const td = d.today;
+    const h = (m: number) => (m / 60).toFixed(1);
     const plan = c.queue.length ? `<div class="plan">接下来：${c.queue.map((s) => esc(c.describeStep(s))).join(" → ")}</div>` : "";
-    return ill + `<div class="needs">${needs}</div>` + plan;
+    return `${ill}
+      <div class="mood-row">
+        <div class="big-stat"><b>${Math.round(mood)}</b><span>心情 · ${moodWord}</span><i style="--p:${mood}%;--c:${NEED_COLORS.mood}"></i></div>
+        <div class="big-stat"><b>${Math.round(d.stress)}</b><span>压力 · ${stressWord}</span><i style="--p:${d.stress}%;--c:${d.stress >= 70 ? "#e86a6a" : "#b9a3d6"}"></i></div>
+        <div class="big-stat"><b>${d.sleepDebt.toFixed(1)}<small>h</small></b><span>睡眠债</span><i style="--p:${Math.min(100, d.sleepDebt * 10)}%;--c:#6b9bf2"></i></div>
+      </div>
+      <h4 class="sec">需求</h4><div class="needs">${needs}</div>
+      <h4 class="sec">今天</h4>
+      <div class="today">
+        <span>🍚 吃了 <b>${td.meals}</b> 顿</span><span>😴 睡了 <b>${h(td.sleepMin)}</b> 小时</span>
+        <span>💼 工作 <b>${h(td.workMin)}</b> 小时</span><span>🎮 玩了 <b>${h(td.funMin)}</b> 小时</span>
+        <span>💬 聊天 <b>${Math.round(td.socialMin)}</b> 句</span><span>🛁 ${td.showered ? "洗过澡了" : "还没洗澡"}</span>
+      </div>${plan}`;
+  }
+
+  /** 档案页：基本资料、性格、技能 */
+  private profileHtml(c: Character) {
+    const d = c.d, p = d.profile;
+    const food = (ids: string[]) => ids.map((id) => FOODS.find((f) => f.id === id)?.name).filter(Boolean).join("、") || "—";
+    const traits = (Object.keys(TRAIT_CN) as (keyof Traits)[]).map((k) => {
+      const [, low, high] = TRAIT_CN[k];
+      return `<div class="trait"><span>${low}</span><span class="tbar"><i style="left:${d.traits[k]}%"></i></span><span>${high}</span></div>`;
+    }).join("");
+    const skills = (Object.keys(SKILL_CN) as (keyof Skills)[]).map((k) => {
+      const v = d.skills[k], lv = Math.floor(v);
+      return `<div class="skill"><span>${SKILL_CN[k]}</span><span class="pips">${Array.from({ length: 10 }, (_, i) => `<i class="${i < lv ? "on" : i === lv ? "part" : ""}" style="${i === lv ? `--p:${(v - lv) * 100}%` : ""}"></i>`).join("")}</span><b>${lv}</b></div>`;
+    }).join("");
+    return `<div class="kv-list">
+        <div><span>年龄</span><b>${p.age} 岁</b></div>
+        <div><span>生日</span><b>${p.birthday ? p.birthday.replace("-", " 月 ") + " 日" : "—"}</b></div>
+        <div><span>职业</span><b>${esc(p.job || "—")}</b></div>
+        <div><span>爱好</span><b>${esc(p.hobbies || "—")}</b></div>
+        <div><span>喜欢吃</span><b>${food(p.likes)}</b></div>
+        <div><span>不爱吃</span><b>${food(p.dislikes)}</b></div>
+      </div>
+      <h4 class="sec">性格</h4><div class="traits">${traits}</div>
+      <h4 class="sec">技能</h4><div class="skills">${skills}</div>
+      <p class="hint">性格会影响需求变化的快慢和 AI 的行为；技能在做相关的事时慢慢提升。</p>`;
   }
 
   // ———————————————————— 聊天（全屏页面） ————————————————————
@@ -548,7 +593,20 @@ export class UI {
           <div class="help">每行一条，格式像「07:30 起床」。到点时 TA 会收到提醒，AI 决定要不要照做。</div>
           <textarea id="e-schedule" placeholder="${esc(SCHEDULE_TEMPLATE)}">${esc(d.schedule)}</textarea>
           <button type="button" class="btn small" id="e-fill">填入示例作息</button></div>
-        <div class="field"><label>外观（占位小人，以后会换成角色包）</label>
+        <h3 class="group">基本资料</h3>
+        <div class="grid2">
+          <div class="field"><label for="e-age">年龄</label><input id="e-age" type="number" inputmode="numeric" min="1" max="120" value="${d.profile.age}" /></div>
+          <div class="field"><label for="e-bday">生日</label><input id="e-bday" type="date" value="${d.profile.birthday ? "2000-" + d.profile.birthday : ""}" /></div>
+        </div>
+        <div class="field"><label for="e-job">职业</label><input id="e-job" value="${esc(d.profile.job)}" placeholder="例如：插画师、大学生" /></div>
+        <div class="field"><label for="e-hobby">爱好</label><input id="e-hobby" value="${esc(d.profile.hobbies)}" placeholder="例如：打游戏、做饭" /></div>
+        <div class="field"><label>口味</label><div class="help">点一下是喜欢（❤），再点一下是不爱吃（✕），再点取消。吃到喜欢的会特别开心。</div>
+          <div class="taste">${FOODS.map((f) => { const st = d.profile.likes.includes(f.id) ? "like" : d.profile.dislikes.includes(f.id) ? "dislike" : ""; return `<button type="button" class="taste-chip ${st}" data-food="${f.id}">${esc(f.name)}</button>`; }).join("")}</div></div>
+        <h3 class="group">性格</h3>
+        <div class="help" style="margin-bottom:8px">性格会影响需求变化的快慢，也会告诉 AI 这个角色是什么样的人。</div>
+        ${(Object.keys(TRAIT_CN) as (keyof Traits)[]).map((k) => `<div class="slider"><span>${TRAIT_CN[k][1]}</span><input type="range" min="0" max="100" step="5" data-trait="${k}" value="${d.traits[k]}" aria-label="${TRAIT_CN[k][1]}到${TRAIT_CN[k][2]}" /><span>${TRAIT_CN[k][2]}</span></div>`).join("")}
+        <h3 class="group">外观</h3>
+        <div class="field"><label>占位小人的颜色（以后会换成角色包）</label>
           <div class="colors">
             ${[["skin", "肤色"], ["hair", "发色"], ["outfit", "衣服"], ["accent", "点缀"], ["eyes", "瞳色"]].map(([k, n]) => `<label>${n}<input type="color" data-color="${k}" value="${(a as unknown as Record<string, string>)[k]}" /></label>`).join("")}
             <label>发型<select id="e-hair">${["短发", "长发", "短发+发饰", "马尾"].map((n, i) => `<option value="${i}" ${a.hairStyle === i ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -556,6 +614,11 @@ export class UI {
       </div>`);
     const $ = <T extends HTMLElement>(s: string) => p.querySelector<T>(s)!;
     $("#e-fill").onclick = () => { $<HTMLTextAreaElement>("#e-schedule").value = SCHEDULE_TEMPLATE; };
+    p.querySelectorAll<HTMLElement>(".taste-chip").forEach((b) => (b.onclick = () => {
+      const st = b.classList.contains("like") ? "dislike" : b.classList.contains("dislike") ? "" : "like";
+      b.classList.remove("like", "dislike");
+      if (st) b.classList.add(st);
+    }));
     $("#e-save").onclick = () => {
       const name = $<HTMLInputElement>("#e-name").value.trim();
       if (!name) { $<HTMLInputElement>("#e-name").focus(); return; }
@@ -564,6 +627,14 @@ export class UI {
       d.schedule = $<HTMLTextAreaElement>("#e-schedule").value.trim();
       p.querySelectorAll<HTMLInputElement>("[data-color]").forEach((i) => ((a as unknown as Record<string, string>)[i.dataset.color!] = i.value));
       a.hairStyle = Number($<HTMLSelectElement>("#e-hair").value);
+      d.profile.age = Math.max(1, Number($<HTMLInputElement>("#e-age").value) || d.profile.age);
+      const bd = $<HTMLInputElement>("#e-bday").value;
+      d.profile.birthday = bd ? bd.slice(5) : "";
+      d.profile.job = $<HTMLInputElement>("#e-job").value.trim();
+      d.profile.hobbies = $<HTMLInputElement>("#e-hobby").value.trim();
+      d.profile.likes = [...p.querySelectorAll<HTMLElement>(".taste-chip.like")].map((x) => x.dataset.food!);
+      d.profile.dislikes = [...p.querySelectorAll<HTMLElement>(".taste-chip.dislike")].map((x) => x.dataset.food!);
+      p.querySelectorAll<HTMLInputElement>("[data-trait]").forEach((i) => (d.traits[i.dataset.trait as keyof Traits] = Number(i.value)));
       p.close();
       if (c) {
         this.game.log("player", `修改了${name}的人设`);

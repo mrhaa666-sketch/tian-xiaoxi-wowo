@@ -72,6 +72,10 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
   const cur = currentScheduleItem(parseSchedule(c.d.schedule), new Date())?.text ?? "";
   const lateNight = period === "深夜" && !/游戏|熬夜/.test(cur);
 
+  if (n.bladder < 25) {
+    const t = find(game, c, "toilet", "use");
+    if (t) return { thought: "要去一下厕所。", emotion, plan: [t] };
+  }
   if (n.energy < 25 || lateNight || /睡/.test(cur)) {
     const s = find(game, c, "bed", "sleep");
     if (s) {
@@ -95,7 +99,12 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
     const b = find(game, c, "bathtub", "bath");
     if (b) return { thought: "该洗个澡了。", emotion, plan: [{ ...b, minutes: 20 }] };
   }
-  if (n.social < 35 && game.chars.length > 1 && Math.random() < 0.7) {
+  if (c.d.stress > 70 || n.fun < 25) {
+    // 压力大或者无聊：找点喜欢的事做
+    const opts = [find(game, c, "sofa", "sit"), find(game, c, "desk", "game"), find(game, c, "tv", "watch"), find(game, c, "upright_piano", "piano"), find(game, c, "easel", "paint"), find(game, c, "bathtub", "bath")].filter(Boolean) as PlanStep[];
+    if (opts.length) return { thought: c.d.stress > 70 ? "压力好大，想放松一下。" : "好无聊，找点事做。", emotion: c.d.stress > 70 ? "sad" : emotion, plan: [{ ...pick(opts), minutes: 30 }] };
+  }
+  if (n.social < 35 * (0.5 + c.d.traits.extraversion / 100) && game.chars.length > 1 && Math.random() < 0.7) {
     const other = pick(game.chars.filter((o) => o !== c));
     plan.push({ do: "talk", target: other.id, line: pick(["你在干嘛呀？", "今天过得怎么样？", "要不要一起吃点东西？", "好无聊啊。"]) });
     return { thought: `想找${other.name}说说话。`, emotion, plan };
