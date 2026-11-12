@@ -1,5 +1,6 @@
 // 场景渲染：地板、墙、家具、食物、角色、气泡，以及镜头（拖动、缩放）。
-import { Application, Container, Graphics, Text } from "pixi.js";
+import { Application, Container, FillPattern, Graphics, Matrix, Sprite, Text, type Texture } from "pixi.js";
+import { getTexture, onAssetsChanged } from "./assets";
 import type { FurnitureInst } from "../core/types";
 import type { Character } from "../sim/character";
 import type { Game } from "../sim/game";
@@ -56,7 +57,27 @@ export class Scene {
   view: { mode: "all" } | { mode: "room"; name: string } = { mode: "all" };
   private camTarget: { x: number; y: number; zoom: number } | null = null;
 
-  constructor(private game: Game) {}
+  constructor(private game: Game) {
+    // 素材图加载完成后整体重画
+    onAssetsChanged(() => {
+      this.builtVersion = -1;
+      for (const v of this.furnitureViews.values()) v.stateKey = "";
+    });
+  }
+
+  private patterns = new Map<string, FillPattern>();
+
+  /** 平铺贴图：一张图铺满 w×h 像素后重复 */
+  private pattern(tex: Texture, w: number, h: number) {
+    const key = `${tex.uid}:${w}x${h}`;
+    let p = this.patterns.get(key);
+    if (!p) {
+      p = new FillPattern(tex, "repeat");
+      p.setTransform(new Matrix().scale(w / tex.width, h / tex.height));
+      this.patterns.set(key, p);
+    }
+    return p;
+  }
 
   async init(host: HTMLElement) {
     await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, 2), autoDensity: true });
@@ -146,7 +167,9 @@ export class Scene {
       roomTiles.get(room)!.push([x, y]);
       const fl = FLOOR_BY[t.floor] ?? FLOOR_BY.wood;
       const pts = [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)];
-      g.poly(pts.flatMap((p) => [p.x, p.y])).fill((x + y) % 2 ? fl.color : shade(fl.color, 0.96)).stroke({ width: 1, color: fl.line, alpha: 0.5 });
+      const ftex = getTexture("floors", fl.texture);
+      if (ftex) g.poly(pts.flatMap((p) => [p.x, p.y])).fill({ fill: this.pattern(ftex, 2 * TW, 2 * TH) });
+      else g.poly(pts.flatMap((p) => [p.x, p.y])).fill((x + y) % 2 ? fl.color : shade(fl.color, 0.96)).stroke({ width: 1, color: fl.line, alpha: 0.5 });
       // 室内地板在墙根处加一圈阴影，房间的边界更清楚
       const shadeEdge = (nx: number, ny: number, a: { x: number; y: number }, b: { x: number; y: number }) => {
         const n = w.tile(nx, ny);
@@ -202,8 +225,10 @@ export class Scene {
         const segs: [number, number, number, number][] = wall.kind === "door"
           ? [[0, 0.16, 0, h], [0.84, 1, 0, h], ...(h > WALL_LOW ? [[0.16, 0.84, h * 0.72, h] as [number, number, number, number]] : [])]
           : [[0, 1, 0, h]];
+        const wtex = h > WALL_LOW ? getTexture("walls", style.texture) : null;
         for (const [u0, u1, v0, v1] of segs) {
-          rect(sx + u0 * TW, sy - v1, sx + u1 * TW, sy - v0, face);
+          if (wtex) g.rect(sx + u0 * TW, sy - v1, (u1 - u0) * TW, v1 - v0).fill({ fill: this.pattern(wtex, 2 * TW, 2 * TW) });
+          else rect(sx + u0 * TW, sy - v1, sx + u1 * TW, sy - v0, face);
           if (v0 === 0) rect(sx + u0 * TW, sy - Math.min(10, v1), sx + u1 * TW, sy, shade(face, 0.82));
           rect(sx + u0 * TW, sy - v1 - T * TH, sx + u1 * TW, sy - v1, style.top);
           g.rect(sx + u0 * TW, sy - v1 - T * TH, (u1 - u0) * TW, v1 + T * TH).stroke({ width: 1, color: shade(face, 0.75), alpha: 0.6 });
@@ -311,24 +336,47 @@ export class Scene {
     }
   }
 
-  private furnitureViews = new Map<string, { box: Container; shadow: Graphics; g: Graphics; stateKey: string }>();
+  private furnitureViews = new Map<string, { box: Container; shadow: Graphics; g: Graphics; sprite: Sprite; extras: Container; stateKey: string }>();
 
   /** 家具画成立牌：一张正对镜头的平面图，立在占地范围的中心，脚下有影子 */
+  /** 家具对应的素材图：使用中/开着时优先用状态图，没有状态图就用普通图 */
+  private furnitureTexture(f: FurnitureInst, lying: boolean) {
+    const def = FURNITURE_BY_ID[f.def];
+    const name = def.sprite ?? def.id;
+    if (lying && def.states?.includes("occupied")) {
+      const t = getTexture("furniture", `${name}_occupied`);
+      if (t) return { tex: t, variant: "occupied" as const };
+    }
+    if (f.state?.on && def.states?.includes("on")) {
+      const t = getTexture("furniture", `${name}_on`);
+      if (t) return { tex: t, variant: "on" as const };
+    }
+    const t = getTexture("furniture", name);
+    return t ? { tex: t, variant: "base" as const } : null;
+  }
+
+  /** 家具画成立牌：一张正对镜头的平面图，立在占地范围靠前的位置，脚下有影子 */
   private drawFurniture(f: FurnitureInst) {
     const def = FURNITURE_BY_ID[f.def];
     if (!def) return;
     const occ = this.game.occupantOf(f.uid);
     const lying = occ && occ.hidden ? occ : null;
-    const foods = this.game.world.foodsOn(f.uid).map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
-    const stateKey = [f.x, f.y, f.rot, f.state?.on ? 1 : 0, lying?.id ?? "", foods.join(",")].join("|");
+    const foodItems = this.game.world.foodsOn(f.uid);
+    const foods = foodItems.map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
+    const art = this.furnitureTexture(f, !!lying);
+    const foodTex = foodItems.map((x) => getTexture("food", `food_${x.kind}`));
+    const stateKey = [f.x, f.y, f.rot, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
     let v = this.furnitureViews.get(f.uid);
     if (v && v.stateKey === stateKey) return;
     if (!v) {
       const box = new Container();
       const shadow = new Graphics();
       const g = new Graphics();
-      box.addChild(shadow, g);
-      v = { box, shadow, g, stateKey: "" };
+      const sprite = new Sprite();
+      sprite.anchor.set(0.5, 1);
+      const extras = new Container();
+      box.addChild(shadow, g, sprite, extras);
+      v = { box, shadow, g, sprite, extras, stateKey: "" };
       this.furnitureViews.set(f.uid, v);
       this.objects.addChild(box);
     }
@@ -336,26 +384,83 @@ export class Scene {
     const { w, h } = footprint(f);
     v.g.clear();
     v.shadow.clear();
+    v.extras.removeChildren().forEach((c) => c.destroy());
+    v.sprite.visible = false;
+    v.g.visible = true;
+
     if (def.walkable) {
       // 地毯直接铺在地板上
       const pts = [toScreen(f.x + 0.1, f.y + 0.1), toScreen(f.x + w - 0.1, f.y + 0.1), toScreen(f.x + w - 0.1, f.y + h - 0.1), toScreen(f.x + 0.1, f.y + h - 0.1)];
       v.box.position.set(0, 0);
-      v.g.poly(pts.flatMap((p) => [p.x, p.y])).fill(def.color).stroke({ width: 4, color: shade(def.color, 1.12) });
+      if (art) {
+        v.g.visible = false;
+        v.sprite.visible = true;
+        v.sprite.texture = art.tex;
+        v.sprite.anchor.set(0, 0);
+        v.sprite.position.set(pts[0].x, pts[0].y);
+        v.sprite.width = pts[1].x - pts[0].x;
+        v.sprite.height = pts[3].y - pts[0].y;
+      } else {
+        v.g.poly(pts.flatMap((p) => [p.x, p.y])).fill(def.color).stroke({ width: 4, color: shade(def.color, 1.12) });
+      }
       v.box.zIndex = -1000;
       return;
     }
-    // 立牌的底边立在占地范围靠前的位置
-    const c = toScreen(f.x + w / 2, f.y + h - 0.15);
-    v.box.position.set(c.x, c.y);
+
     const sw = standeeWidth(f.def, w, h);
     const sh = STANDEE_H[f.def] ?? def.height;
-    // 影子：立牌底边下的一个椭圆
-    v.shadow.ellipse(0, 2, sw * 0.5, 9).fill({ color: 0x000000, alpha: 0.14 });
-    const sleeper = lying ? { hair: hex(lying.d.appearance.hair), skin: hex(lying.d.appearance.skin) } : undefined;
-    drawStandee(v.g, f.def, def.color, sw, sh, { on: !!f.state?.on, sleeper, foods });
-    // 朝向：rot=1 时左右镜像
-    v.g.scale.x = f.rot === 1 && w === 1 ? -1 : 1;
-    v.box.zIndex = (f.y + h - 0.15) * 10;
+    if (def.wallMounted) {
+      // 挂在后墙上：贴在这一格的北墙上，离地一段距离
+      const c = toScreen(f.x + w / 2, f.y);
+      v.box.position.set(c.x, c.y - 70);
+      v.box.zIndex = f.y * 10 - 4;
+    } else {
+      const c = toScreen(f.x + w / 2, f.y + h - 0.15);
+      v.box.position.set(c.x, c.y);
+      v.box.zIndex = (f.y + h - 0.15) * 10;
+      v.shadow.ellipse(0, 2, sw * 0.5, 9).fill({ color: 0x000000, alpha: 0.14 });
+    }
+    const mirror = f.rot === 1 && w === 1 ? -1 : 1;
+    let topY = -sh; // 立牌顶面大概的位置，用来放食物
+    if (art) {
+      // 有素材图：按立牌宽度缩放，高度按图片比例
+      v.g.visible = false;
+      v.sprite.visible = true;
+      v.sprite.texture = art.tex;
+      v.sprite.anchor.set(0.5, 1);
+      v.sprite.position.set(0, 0);
+      const k = sw / art.tex.width;
+      v.sprite.scale.set(k * mirror, k);
+      topY = -art.tex.height * k * 0.62;
+      // 有人躺着、但没有专门的「有人」图时，在床上叠一个小脑袋
+      if (lying && art.variant !== "occupied") this.drawSleeperHead(v.extras, lying, -sw * 0.3, -art.tex.height * k * 0.55);
+      else if (lying) this.drawSleeperHead(v.extras, lying, -sw * 0.3, -art.tex.height * k * 0.62);
+    } else {
+      const sleeper = lying ? { hair: hex(lying.d.appearance.hair), skin: hex(lying.d.appearance.skin) } : undefined;
+      drawStandee(v.g, f.def, def.color, sw, sh, { on: !!f.state?.on, sleeper, foods: foodTex.some(Boolean) ? [] : foods });
+      v.g.scale.x = mirror;
+    }
+    // 桌上的食物：有图就用图
+    foodItems.forEach((food, i) => {
+      const t = foodTex[i];
+      if (!t) return;
+      const sp = new Sprite(t);
+      sp.anchor.set(0.5, 0.85);
+      const size = 44;
+      sp.scale.set(size / t.width);
+      sp.position.set(-sw * 0.2 + i * 40, topY);
+      v!.extras.addChild(sp);
+    });
+  }
+
+  /** 躺在床上/浴缸里的人：画一个小脑袋（以后可以换成角色包里的头像） */
+  private drawSleeperHead(parent: Container, c: Character, x: number, y: number) {
+    const g = new Graphics();
+    const hair = hex(c.d.appearance.hair), skin = hex(c.d.appearance.skin);
+    g.circle(x, y, 15).fill(hair).stroke({ width: 2, color: 0x5a4a44, alpha: 0.8 });
+    g.ellipse(x + 3, y + 4, 10, 7).fill(skin);
+    g.moveTo(x - 2, y + 4).lineTo(x + 2, y + 4).moveTo(x + 6, y + 4).lineTo(x + 10, y + 4).stroke({ width: 1.5, color: 0x5a4a44 });
+    parent.addChild(g);
   }
 
   // ———————————————————— 每帧 ————————————————————

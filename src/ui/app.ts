@@ -35,6 +35,7 @@ export class UI {
   tab: "status" | "chat" | "relations" | "memory" = "status";
   build: BuildState = { on: false, tool: "floor", floor: "wood", wallStyle: "cream", furniture: "bed", room: "bedroom", roomName: "新房间", rot: 0, autoWalls: true };
   logCollapsed = false;
+  furnCat = "卧室";
   private typing = new Set<string>();
   private els: Record<string, HTMLElement> = {};
   onSelect?: (id: string | null) => void;
@@ -298,7 +299,9 @@ export class UI {
       opts = WALL_STYLES.map((w) => `<button class="btn small ${b.wallStyle === w.id ? "active" : ""}" data-wall="${w.id}"><span class="swatch" style="background:#${w.color.toString(16).padStart(6, "0")}"></span> ${w.name}</button>`).join("");
       hint = "点格子的边。再点一次已有的墙可以拆掉。";
     } else if (b.tool === "furniture") {
-      opts = FURNITURE.map((f) => `<button class="btn small ${b.furniture === f.id ? "active" : ""}" data-furn="${f.id}" title="${f.category}">${f.name}</button>`).join("");
+      const cats = [...new Set(FURNITURE.map((f) => f.category))];
+      opts = `<div class="cat-tabs">${cats.map((c) => `<button class="btn small ${this.furnCat === c ? "active" : ""}" data-cat="${esc(c)}">${esc(c)}</button>`).join("")}</div>`
+        + `<div class="cat-items">${FURNITURE.filter((f) => f.category === this.furnCat).map((f) => `<button class="btn small ${b.furniture === f.id ? "active" : ""}" data-furn="${f.id}">${esc(f.name)}</button>`).join("")}</div>`;
       hint = "点地板放置，按 R 或点「旋转」改朝向。";
       opts += ` <button class="btn small" id="rot">旋转</button>`;
     } else if (b.tool === "room") {
@@ -313,6 +316,7 @@ export class UI {
     el.querySelectorAll<HTMLElement>("[data-floor]").forEach((x) => (x.onclick = () => { b.floor = x.dataset.floor!; this.renderBuild(); }));
     el.querySelectorAll<HTMLElement>("[data-wall]").forEach((x) => (x.onclick = () => { b.wallStyle = x.dataset.wall!; this.renderBuild(); }));
     el.querySelectorAll<HTMLElement>("[data-furn]").forEach((x) => (x.onclick = () => { b.furniture = x.dataset.furn!; this.renderBuild(); }));
+    el.querySelectorAll<HTMLElement>("[data-cat]").forEach((x) => (x.onclick = () => { this.furnCat = x.dataset.cat!; this.renderBuild(); }));
     el.querySelectorAll<HTMLElement>("[data-room]").forEach((x) => (x.onclick = () => { b.room = x.dataset.room!; this.renderBuild(); }));
     el.querySelector<HTMLElement>("#build-done")!.onclick = () => { b.on = false; this.renderBuild(); };
     const rot = el.querySelector<HTMLElement>("#rot");
