@@ -16,13 +16,13 @@ export const ROOM_PRESETS: RoomPreset[] = [
   {
     id: "bedroom", name: "卧室", w: 4, h: 4, floor: "carpet", wallStyle: "peach",
     furniture: [
-      { def: "bed", x: 0, y: 0 }, { def: "wardrobe", x: 3, y: 0 }, { def: "lamp", x: 1, y: 0 }, { def: "plant", x: 3, y: 3 },
+      { def: "bed", x: 0, y: 0 }, { def: "wardrobe", x: 3, y: 0 }, { def: "lamp", x: 2, y: 0 }, { def: "plant", x: 3, y: 3 },
     ],
   },
   {
     id: "living", name: "客厅", w: 5, h: 4, floor: "wood", wallStyle: "cream",
     furniture: [
-      { def: "rug", x: 1, y: 1 }, { def: "sofa", x: 1, y: 3 }, { def: "tv", x: 1, y: 0 }, { def: "plant", x: 4, y: 0 }, { def: "bookshelf", x: 0, y: 0 },
+      { def: "rug", x: 1, y: 1 }, { def: "sofa", x: 2, y: 3 }, { def: "tv", x: 1, y: 0 }, { def: "plant", x: 4, y: 0 }, { def: "bookshelf", x: 0, y: 0 },
     ],
   },
   {
@@ -102,17 +102,17 @@ export function buildStarterHouse(world: World) {
   stampPreset(world, get("bedroom"), 0, 4, "卧室A");
   stampPreset(world, get("bedroom"), 4, 4, "卧室B");
   stampPreset(world, get("bathroom"), 8, 4);
-  stampPreset(world, get("study"), 9, 0);
+  stampPreset(world, { ...get("study"), h: 4 }, 9, 0);
   // 房间之间的门
   const door = (x: number, y: number, d: "N" | "W", style: string) => world.setWall(x, y, d, { kind: "door", style });
   door(5, 1, "W", "cream");  // 客厅 ↔ 厨房
   door(9, 2, "W", "sage");   // 厨房 ↔ 书房
   door(1, 4, "N", "cream");  // 客厅 ↔ 卧室A
-  door(4, 4, "N", "cream");  // 客厅 ↔ 卧室B
+  door(5, 4, "N", "sage");   // 厨房 ↔ 卧室B
   door(8, 5, "W", "peach");  // 卧室B ↔ 浴室
   door(0, 1, "W", "cream");  // 客厅 ↔ 院子
   // 原本朝外的门改成普通墙，只保留客厅前门
-  for (const k of ["2,4,N", "7,4,N", "10,3,N", "9,7,N"]) if (world.data.walls[k]?.kind === "door") world.data.walls[k] = { kind: "wall", style: "cream" };
+  for (const k of ["2,4,N", "7,4,N", "10,4,N", "9,7,N"]) if (world.data.walls[k]?.kind === "door") world.data.walls[k] = { kind: "wall", style: "cream" };
   // 院子
   for (let x = 0; x < 12; x++) for (let y = 8; y < 10; y++) if (!world.tile(x, y)) world.setFloor(x, y, "grass", "院子");
   for (let x = -2; x < 0; x++) for (let y = 0; y < 10; y++) world.setFloor(x, y, "grass", "院子");

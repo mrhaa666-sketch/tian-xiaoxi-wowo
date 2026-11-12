@@ -278,7 +278,9 @@ export class Game {
     }
     beds.sort((a, b) => Math.hypot(a.x - c.d.pos.x, a.y - c.d.pos.y) - Math.hypot(b.x - c.d.pos.x, b.y - c.d.pos.y));
     const it = c.d.illness ? "rest" : "nap";
-    c.setPlan([{ do: "use", target: beds[0].uid, interaction: it, minutes: c.d.illness ? 120 : 30 }]);
+    const minutes = c.d.illness ? 120 : 30;
+    c.setPlan([{ do: "use", target: beds[0].uid, interaction: it, minutes }]);
+    c.forcedUntil = Date.now() + 15_000 + (minutes * 60_000) / this.settings.timeScale;
     c.showEmote("💢", 2);
     this.log("player", `把${c.name}赶回床上休息`);
     this.emit(c, `主人把你赶回了床上，让你好好休息（你已经被安排躺下了，只需要用一句话回应主人）。`, 3);

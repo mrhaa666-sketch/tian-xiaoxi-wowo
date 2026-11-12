@@ -131,21 +131,23 @@ export function buildContext(game: Game, c: Character, events: GameEvent[]) {
 
   const others = game.chars.filter((o) => o !== c);
   if (others.length) {
-    lines.push("【家里的其他人】");
+    const rows = ["【家里的其他人】"];
     for (const o of others) {
       const r = d.relations[o.id];
-      lines.push(`- ${o.name}（id: ${o.id}）在${o.room}，正在${o.d.activity}，看起来${EMOTION_CN[o.d.emotion]}${o.d.illness ? "，生病了" : ""}。你对TA的好感 ${r?.affinity ?? 0}${r?.note ? "，印象：" + r.note : ""}`);
+      rows.push(`- ${o.name}（id: ${o.id}）在${o.room}，正在${o.d.activity}，看起来${EMOTION_CN[o.d.emotion]}${o.d.illness ? "，生病了" : ""}。你对TA的好感 ${r?.affinity ?? 0}${r?.note ? "，印象：" + r.note : ""}`);
     }
+    lines.push(rows.join("\n"));
   }
 
   const furn = game.world.describeFurniture().slice(0, 40);
-  lines.push("【家具（id | 名称 | 房间 | 可以做的事）】");
+  const frows = ["【家具（id | 名称 | 房间 | 可以做的事）】"];
   for (const f of furn) {
     const occ = game.occupantOf(f.uid);
     const acts = f.interactions.map((i) => `${i.id}=${i.name}(${i.minutes[0]}-${i.minutes[1]}分钟)`).join("、");
     const foods = game.world.foodsOn(f.uid).map((x) => FOOD_BY_ID[x.kind]?.name).filter(Boolean);
-    lines.push(`- ${f.uid} | ${f.name} | ${f.room} | ${acts}${occ ? ` | ${occ === c ? "你" : occ.name}正在用` : ""}${foods.length ? ` | 上面有：${foods.join("、")}` : ""}`);
+    frows.push(`- ${f.uid} | ${f.name} | ${f.room} | ${acts}${occ ? ` | ${occ === c ? "你" : occ.name}正在用` : ""}${foods.length ? ` | 上面有：${foods.join("、")}` : ""}`);
   }
+  lines.push(frows.join("\n"));
   lines.push(`【房间】${game.world.rooms().join("、")}`);
 
   const mem = [...d.memories].sort((a, b) => b.weight - a.weight || b.t - a.t).slice(0, 12);

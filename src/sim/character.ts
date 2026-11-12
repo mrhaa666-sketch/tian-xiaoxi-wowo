@@ -30,6 +30,7 @@ export class Character {
   emote: { icon: string; until: number } | null = null;
   usingFurniture: string | null = null;
   lastTold = 0; // 上次主动找主人说话的时间
+  forcedUntil = 0; // 被主人强制安排（比如赶回床上）的截止时间，期间 AI 只能让 TA 说话，不能起身
   private sickCheckAcc = 0;
 
   constructor(d: CharacterData, private game: Game) {
