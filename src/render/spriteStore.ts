@@ -71,8 +71,11 @@ export async function readSprites(id: string): Promise<Record<string, string> | 
   try {
     const r = await fetch(spriteUrl(id, "manifest.json"));
     if (!r.ok) return null;
-    const m = await r.json() as { bodies: string[]; faces: string[]; avatar: Record<string, string> };
-    const names = ["manifest.json", ...m.bodies.flatMap((b) => m.faces.map((f) => `${b}__${f.replace(/^face_/, "")}.png`)), ...Object.values(m.avatar)];
+    const m = await r.json() as { bodies?: string[]; faces?: string[]; frames?: Record<string, string>; poses?: string[]; avatar: Record<string, string> };
+    const pics = m.frames
+      ? [...new Set([...Object.values(m.frames), ...(m.poses ?? [])])].map((n) => `${n}.png`)
+      : (m.bodies ?? []).flatMap((b) => (m.faces ?? []).map((f) => `${b}__${f.replace(/^face_/, "")}.png`));
+    const names = ["manifest.json", ...pics, ...Object.values(m.avatar)];
     const out: Record<string, string> = {};
     for (const name of names) {
       const res = await fetch(spriteUrl(id, name));

@@ -130,9 +130,13 @@ export interface SpriteManifest {
   height: number;
   footX: number;
   footY: number;
-  bodies: string[];
-  faces: string[];
-  emotionBody: Record<string, string>;
+  // 合成方式：身体 × 表情（tools/sd-compose.mjs）
+  bodies?: string[];
+  faces?: string[];
+  emotionBody?: Record<string, string>;
+  // 整图方式：每个状态直接对应一张完整的图（tools/sd-finished.mjs）
+  frames?: Record<string, string>;
+  poses?: string[];
   avatar: Record<string, string>;
 }
 
@@ -172,7 +176,8 @@ export class SpriteSkin implements CharSkin {
       this.sprite.anchor.set(m.footX / m.width, m.footY / m.height);
       this.sprite.scale.set(SPRITE_H / m.height);
       // 先把默认姿势加载好，再从占位小人切过来
-      void this.tex(`${m.emotionBody.normal}__normal`).then(() => {
+      const first = m.frames ? m.frames.normal : `${m.emotionBody!.normal}__normal`;
+      void this.tex(first).then(() => {
         this.view.removeChild(this.fallback.view);
         this.fallback.view.destroy({ children: true });
         this.view.addChild(this.shadow, this.sprite);
@@ -201,18 +206,36 @@ export class SpriteSkin implements CharSkin {
     if (!m || !this.textures.size) { this.fallback.update(c, t); return; }
     const emo = c.d.illness ? "sick" : c.d.emotion;
     const speaking = !!c.speech;
-    let body = speaking && m.bodies.includes("talk") ? "talk" : m.emotionBody[emo] ?? m.emotionBody.normal;
-    let face = m.faces.includes(`face_${emo}`) ? emo : "normal";
-    // 眨眼：每隔几秒闭眼一下（借用「困」的闭眼表情）
     const now = performance.now();
     if (now > this.nextBlink + 140) this.nextBlink = now + 2500 + Math.random() * 3500;
-    if (now > this.nextBlink && ["normal", "sad", "surprised"].includes(face) && m.faces.includes("face_sleepy")) face = "sleepy";
-    if (!m.bodies.includes(body)) body = m.bodies[0];
-    const key = `${body}__${face}`;
+    const blinking = now > this.nextBlink;
+    let key: string;
+    if (m.frames) {
+      const f = m.frames;
+      key = speaking && f.talk ? f.talk : f[emo] ?? f.normal;
+      if (blinking && !speaking && key === f.normal && f.blink) key = f.blink;
+    } else {
+      key = this.composedKey(m, emo, speaking, blinking);
+    }
     if (key !== this.current) {
       const tx = this.textures.get(key);
       if (tx) { this.sprite.texture = tx; this.current = key; } else void this.tex(key);
     }
+    this.pose(c, t);
+  }
+
+  /** 身体 × 表情合成出来的立绘：挑姿势和表情 */
+  private composedKey(m: SpriteManifest, emo: string, speaking: boolean, blinking: boolean) {
+    const bodies = m.bodies ?? [], faces = m.faces ?? [], eb = m.emotionBody ?? {};
+    let body = speaking && bodies.includes("talk") ? "talk" : eb[emo] ?? eb.normal;
+    let face = faces.includes(`face_${emo}`) ? emo : "normal";
+    // 眨眼：每隔几秒闭眼一下（借用「困」的闭眼表情）
+    if (blinking && ["normal", "sad", "surprised"].includes(face) && faces.includes("face_sleepy")) face = "sleepy";
+    if (!bodies.includes(body)) body = bodies[0];
+    return `${body}__${face}`;
+  }
+
+  private pose(c: Character, t: number) {
     // 走路时一上一下；左右翻转（原图朝左）
     const walking = c.moving;
     const bob = walking ? Math.abs(Math.sin(t * 10)) * 5 : Math.sin(t * 2.2) * 0.8;

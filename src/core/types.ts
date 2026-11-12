@@ -250,6 +250,8 @@ export interface Settings {
   news: NewsSettings;
   timeScale: number; // 调试用：需求变化和动作时长的倍率
   wallMode: "cutaway" | "full";
+  /** 画面时间预览：空 = 跟着现实时间；数字 = 固定在这个钟点（只影响画面光线） */
+  previewHour?: number | null;
 }
 
 export interface LogEntry {

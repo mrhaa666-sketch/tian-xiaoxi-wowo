@@ -1,5 +1,6 @@
 // 场景渲染：地板、墙、家具、食物、角色、气泡，以及镜头（拖动、缩放）。
-import { Application, Container, FillPattern, Graphics, Matrix, Sprite, Text, type Texture } from "pixi.js";
+import { Application, ColorMatrixFilter, Container, FillGradient, FillPattern, Graphics, Matrix, Sprite, Text, type Texture } from "pixi.js";
+import { currentHour, daylightAt, type Daylight } from "./daylight";
 import { getTexture, onAssetsChanged } from "./assets";
 import type { FurnitureInst } from "../core/types";
 import type { Character } from "../sim/character";
@@ -56,6 +57,16 @@ export class Scene {
   private ghostG = new Graphics();
   private overlay = new Container();
   private tint = new Graphics();
+  // 一天里的光线：天空背景、整栋房子的调色、夜里的灯光
+  private sky = new Graphics();
+  private skyGrad: { key: string; g: FillGradient } | null = null;
+  private stars: { x: number; y: number; r: number; p: number }[] = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random() * 0.75, r: 0.6 + Math.random() * 1.4, p: Math.random() * 6.28 }));
+  private clouds: { x: number; y: number; s: number; v: number }[] = Array.from({ length: 5 }, () => ({ x: Math.random(), y: 0.08 + Math.random() * 0.35, s: 0.6 + Math.random() * 0.8, v: 0.004 + Math.random() * 0.006 }));
+  private lightFilter = new ColorMatrixFilter();
+  private lightKey = "";
+  private glow = new Graphics();
+  private builtLightHour = -1;
+  daylight: Daylight = daylightAt(12);
   private skins = new Map<string, CharSkin>();
   private bubbles = new Map<string, { box: Container; bg: Graphics; text: Text; emote: Text; name: Text }>();
   private builtVersion = -1;
@@ -95,7 +106,9 @@ export class Scene {
     this.objects.sortableChildren = true;
     this.camera.addChild(this.floorLayer, this.objects, this.ghostG);
     this.zoom = Math.min(0.7, Math.max(0.35, this.app.screen.width / 1900));
-    this.app.stage.addChild(this.camera, this.tint, this.overlay);
+    this.glow.blendMode = "add";
+    this.app.stage.addChild(this.sky, this.camera, this.glow, this.tint, this.overlay);
+    this.camera.filters = [this.lightFilter];
     this.camera.scale.set(this.zoom);
     this.rebuildStatic();
     this.showAll(true);
@@ -246,8 +259,7 @@ export class Scene {
         if (wall.kind === "door") rect(sx + 0.16 * TW, sy - 3, sx + 0.84 * TW, sy + 2, 0xb98b62);
         if (wall.kind === "window") {
           if (h > WALL_LOW) {
-            const hour = new Date().getHours();
-            const sky = hour >= 19 || hour < 6 ? 0x2f3d66 : hour < 8 || hour >= 17 ? 0xf6c59a : 0xa9d8f5;
+            const sky = this.daylight.window;
             rect(sx + 0.16 * TW, sy - h * 0.82, sx + 0.84 * TW, sy - h * 0.34, 0xffffff);
             rect(sx + 0.21 * TW, sy - h * 0.78, sx + 0.79 * TW, sy - h * 0.38, sky);
             rect(sx + 0.49 * TW, sy - h * 0.78, sx + 0.51 * TW, sy - h * 0.38, 0xffffff);
@@ -266,7 +278,7 @@ export class Scene {
           rect(sx - half, y0 + b * TH - h, sx + half, y0 + b * TH, shade(style.color, 0.8));
         }
         if (wall.kind === "door") rect(sx - half, y0 + 0.12 * TH, sx + half, y0 + 0.88 * TH, 0xb98b62);
-        if (wall.kind === "window" && h > WALL_LOW) rect(sx - half + 2, y0 + 0.25 * TH - h * 0.7, sx + half - 2, y0 + 0.75 * TH - h * 0.7, 0xa9d8f5);
+        if (wall.kind === "window" && h > WALL_LOW) rect(sx - half + 2, y0 + 0.25 * TH - h * 0.7, sx + half - 2, y0 + 0.75 * TH - h * 0.7, this.daylight.window);
         g.zIndex = (y + 1) * 10 - 6;
       }
       this.objects.addChild(g);
@@ -505,6 +517,10 @@ export class Scene {
       if (Math.abs(ct.zoom - this.zoom) < 0.002 && Math.abs(ct.x - this.camera.x) < 0.5 && Math.abs(ct.y - this.camera.y) < 0.5) this.camTarget = null;
     }
     const w = this.game.world;
+    this.daylight = daylightAt(currentHour(this.game.settings.previewHour));
+    // 窗外颜色画在墙上，天色变了（每半小时）就重画一次墙
+    const lh = Math.round(this.daylight.hour * 2);
+    if (lh !== this.builtLightHour) { this.builtLightHour = lh; this.builtVersion = -1; }
     if (w.version !== this.builtVersion || this.game.settings.wallMode !== this.builtWallMode) {
       this.rebuildStatic();
       for (const [id, v] of this.furnitureViews) if (!w.getFurniture(id)) { v.box.destroy({ children: true }); this.furnitureViews.delete(id); }
@@ -541,6 +557,113 @@ export class Scene {
     this.applyFocus();
     this.drawGhost();
     this.drawTint();
+    this.drawSky(t);
+    this.applyLight();
+    this.drawGlow(t);
+  }
+
+  /** 天空：渐变 + 太阳/月亮 + 白天的云 + 夜里的星星 */
+  private drawSky(t: number) {
+    const dl = this.daylight, W = this.app.screen.width, H = this.app.screen.height;
+    const g = this.sky;
+    g.clear();
+    // 渐变会生成贴图，颜色变了才重建
+    const gk = `${dl.skyTop},${dl.skyBottom}`;
+    if (this.skyGrad?.key !== gk) {
+      this.skyGrad?.g.destroy();
+      this.skyGrad = { key: gk, g: new FillGradient({ type: "linear", start: { x: 0, y: 0 }, end: { x: 0, y: 1 }, colorStops: [{ offset: 0, color: dl.skyTop }, { offset: 1, color: dl.skyBottom }], textureSpace: "local" }) };
+    }
+    g.rect(0, 0, W, H).fill(this.skyGrad.g);
+    // 星星（一闪一闪）
+    if (dl.stars > 0.02) for (const s of this.stars) g.circle(s.x * W, s.y * H, s.r).fill({ color: 0xffffff, alpha: dl.stars * (0.45 + 0.4 * Math.sin(t * 1.7 + s.p)) });
+    // 太阳：6 点从左边升起，18 点从右边落下；月亮反过来
+    const h = dl.hour;
+    if (h >= 5.5 && h <= 18.8) {
+      const p = (h - 5.5) / 13.3, x = W * (0.08 + 0.84 * p), y = H * (0.5 - Math.sin(p * Math.PI) * 0.27);
+      const warm = h < 8 || h > 16.5;
+      g.circle(x, y, 46).fill({ color: warm ? 0xffb070 : 0xfff4c0, alpha: 0.22 * dl.sun });
+      g.circle(x, y, 22).fill({ color: warm ? 0xffc48a : 0xfffbe6, alpha: 0.95 * Math.max(0.3, dl.sun) });
+    } else {
+      const p = ((h - 18.8 + 24) % 24) / 10.7, x = W * (0.12 + 0.76 * p), y = H * (0.45 - Math.sin(p * Math.PI) * 0.22);
+      g.circle(x, y, 36).fill({ color: 0xdfe6ff, alpha: 0.12 });
+      g.circle(x, y, 17).fill({ color: 0xf3f1e2, alpha: 0.95 });
+      g.circle(x + 7, y - 5, 15).fill(dl.skyTop); // 月牙
+    }
+    // 白天的云慢慢飘
+    if (dl.night < 0.5) for (const c of this.clouds) {
+      const x = (((c.x + t * c.v * 0.1) % 1.3) - 0.15) * W, y = c.y * H, s = c.s * 34;
+      const a = (1 - dl.night * 2) * 0.75;
+      g.ellipse(x, y, s * 1.6, s * 0.6).fill({ color: 0xffffff, alpha: a });
+      g.ellipse(x - s * 0.8, y + s * 0.15, s, s * 0.45).fill({ color: 0xffffff, alpha: a });
+      g.ellipse(x + s * 0.9, y + s * 0.1, s * 1.1, s * 0.5).fill({ color: 0xffffff, alpha: a });
+    }
+  }
+
+  /** 整栋房子的调色（清晨偏粉、正午明亮、傍晚偏橙、夜里偏暗蓝） */
+  private applyLight() {
+    const [r, g, b] = this.daylight.mul;
+    const key = `${r.toFixed(3)},${g.toFixed(3)},${b.toFixed(3)}`;
+    if (key === this.lightKey) return;
+    this.lightKey = key;
+    this.lightFilter.matrix = [r, 0, 0, 0, 0, 0, g, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, 1, 0];
+    this.camera.filters = Math.abs(r - 1) + Math.abs(g - 1) + Math.abs(b - 1) < 0.02 ? [] : [this.lightFilter];
+  }
+
+  /** 夜里的灯光：有人醒着的房间开灯，台灯落地灯有光晕，院子里有萤火虫 */
+  private drawGlow(t: number) {
+    const g = this.glow, dl = this.daylight;
+    g.clear();
+    g.position.set(this.camera.x, this.camera.y);
+    g.scale.set(this.zoom);
+    if (dl.night < 0.05) return;
+    const w = this.game.world;
+    const rooms = this.roomBoxes();
+    const lit = new Set(this.game.chars.filter((c) => !c.hidden).map((c) => c.room));
+    for (const [name, r] of rooms) {
+      if (r.outdoor || !lit.has(name)) continue;
+      // 天花板的灯：整间房暖暖的
+      const a = toScreen(r.x0, r.y0), b = toScreen(r.x1, r.y1);
+      g.rect(a.x, a.y - WALL_H * 0.3, b.x - a.x, b.y - a.y + WALL_H * 0.3).fill({ color: 0xffa94d, alpha: 0.22 * dl.night });
+      const c = toScreen((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
+      g.ellipse(c.x, c.y, (b.x - a.x) * 0.42, (b.y - a.y) * 0.42).fill({ color: 0xffc070, alpha: 0.14 * dl.night });
+    }
+    for (const f of w.data.furniture) {
+      const glowColor = (f.def === "lamp" || f.def === "lamp_desk") && f.state?.on ? 0xffc46a : f.def === "red_lantern" ? 0xff5a40 : f.def === "christmas_tree" ? 0xfff0a0 : f.def === "fish_tank" ? 0x7fd8ff : 0;
+      if (!glowColor) continue;
+      const c = toScreen(f.x + 0.5, f.y + 0.6);
+      const up = f.def === "lamp" ? 95 : f.def === "red_lantern" ? 130 : 45;
+      for (const [rad, al] of [[70, 0.12], [42, 0.16], [20, 0.22]] as const) g.circle(c.x, c.y - up, rad).fill({ color: glowColor, alpha: al * dl.night });
+    }
+    // 萤火虫
+    for (const [, r] of rooms) {
+      if (!r.outdoor) continue;
+      const n = Math.round((r.x1 - r.x0) * (r.y1 - r.y0) / 3);
+      for (let i = 0; i < n; i++) {
+        const sx = r.x0 + ((i * 0.618 + Math.sin(t * 0.3 + i)) % 1 + 1) % 1 * (r.x1 - r.x0);
+        const sy = r.y0 + ((i * 0.381 + Math.cos(t * 0.25 + i * 1.7) * 0.3) % 1 + 1) % 1 * (r.y1 - r.y0);
+        const p = toScreen(sx, sy);
+        const a = (0.5 + 0.5 * Math.sin(t * 2.3 + i * 2.1)) * dl.night;
+        g.circle(p.x, p.y - 30 - 20 * Math.sin(t * 0.8 + i), 5).fill({ color: 0xd8ff6a, alpha: 0.18 * a });
+        g.circle(p.x, p.y - 30 - 20 * Math.sin(t * 0.8 + i), 1.8).fill({ color: 0xf4ffb0, alpha: 0.9 * a });
+      }
+    }
+  }
+
+  private roomBoxCache: { v: number; m: Map<string, { x0: number; y0: number; x1: number; y1: number; outdoor: boolean }> } | null = null;
+  private roomBoxes() {
+    const w = this.game.world;
+    if (this.roomBoxCache?.v === w.version) return this.roomBoxCache.m;
+    const m = new Map<string, { x0: number; y0: number; x1: number; y1: number; outdoor: boolean }>();
+    for (const [k, t] of Object.entries(w.data.tiles)) {
+      const [x, y] = k.split(",").map(Number);
+      const name = t.room ?? "";
+      const r = m.get(name) ?? { x0: x, y0: y, x1: x + 1, y1: y + 1, outdoor: false };
+      r.x0 = Math.min(r.x0, x); r.y0 = Math.min(r.y0, y); r.x1 = Math.max(r.x1, x + 1); r.y1 = Math.max(r.y1, y + 1);
+      if (["grass", "deck", "stone"].includes(t.floor)) r.outdoor = true;
+      m.set(name, r);
+    }
+    this.roomBoxCache = { v: w.version, m };
+    return m;
   }
 
   private updateBubble(c: Character) {
@@ -622,15 +745,8 @@ export class Scene {
   }
 
   private drawTint() {
-    const h = new Date().getHours() + new Date().getMinutes() / 60;
-    let alpha = 0;
-    let color = 0x1d2b5c;
-    if (h >= 21 || h < 5) alpha = 0.26;
-    else if (h >= 19) alpha = 0.16;
-    else if (h >= 17) { alpha = 0.1; color = 0xf2994a; }
-    else if (h < 7) alpha = 0.12;
+    // 光线改由天空、整体调色和夜里的灯光负责（见 drawSky / applyLight / drawGlow）
     this.tint.clear();
-    if (alpha > 0) this.tint.rect(0, 0, this.app.screen.width, this.app.screen.height).fill({ color, alpha });
   }
 
   tileKeyAt(sx: number, sy: number) {

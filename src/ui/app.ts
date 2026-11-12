@@ -869,6 +869,9 @@ export class UI {
         <div class="field"><label for="s-block">屏蔽词（逗号分隔）</label><input id="s-block" value="${esc(s.news.blockedWords.join("，"))}" /></div>
         <h3 class="group">画面和测试</h3>
         <label class="switch"><input type="checkbox" id="s-walls" ${s.wallMode === "full" ? "checked" : ""} /><span>房间之间的墙显示成高墙</span></label>
+        <div class="field"><label for="s-hour">画面时间</label>
+          <select id="s-hour">${[["", "跟着现实时间"], ["6", "日出（6 点）"], ["9", "上午（9 点）"], ["12.5", "正午（12 点半）"], ["17.6", "傍晚（5 点半）"], ["18.8", "黄昏（7 点）"], ["21", "夜晚（9 点）"], ["2", "深夜（2 点）"]].map(([v, n]) => `<option value="${v}" ${String(s.previewHour ?? "") === v ? "selected" : ""}>${n}</option>`).join("")}</select>
+          <div class="help">只改画面的天色和灯光，用来预览；角色的作息、节日还是按现实时间。</div></div>
         <div class="field"><label for="s-scale">时间倍率（测试用）</label><input id="s-scale" type="number" inputmode="numeric" min="1" max="600" value="${s.timeScale}" />
           <div class="help">1 = 和现实同步。调大后饥饿、困倦和动作时长都会加快；作息和节日仍按现实时钟。</div></div>
         <button class="btn danger block" id="s-reset">重置存档</button>
@@ -911,6 +914,8 @@ export class UI {
       s.news.feeds = $<HTMLTextAreaElement>("#s-feeds").value.split("\n").map((l) => l.split("|").map((x) => x.trim())).filter((q) => q.length >= 3 && q[2]).map(([name, category, url]) => ({ name, category, url }));
       s.news.blockedWords = $<HTMLInputElement>("#s-block").value.split(/[,，\s]+/).filter(Boolean);
       s.wallMode = $<HTMLInputElement>("#s-walls").checked ? "full" : "cutaway";
+      const ph = $<HTMLSelectElement>("#s-hour").value;
+      s.previewHour = ph === "" ? null : Number(ph);
       s.timeScale = Math.min(600, Math.max(1, Number($<HTMLInputElement>("#s-scale").value) || 1));
       this.game.newsFetchedAt = 0;
       p.close();
