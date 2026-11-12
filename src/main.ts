@@ -4,7 +4,6 @@ import { getNews } from "./ai/news";
 import { Game } from "./sim/game";
 import { Scene, type Ghost } from "./render/scene";
 import { UI } from "./ui/app";
-import { FURNITURE_BY_ID } from "./world/catalog";
 import { ROOM_PRESETS, autoWalls, stampPreset } from "./world/presets";
 
 async function boot() {
@@ -13,9 +12,15 @@ async function boot() {
   const brain = new Brain(game);
   const ui = new UI(document.getElementById("app")!, game, brain);
   const scene = new Scene(game);
+  scene.insets = () => ui.insets();
   await scene.init(ui.stage);
+  ui.onLayout = () => scene.refit();
+  // 手机竖屏放不下整栋房子的细节：一开始先看第一个角色所在的房间
+  const first = game.chars[0];
+  if (first && game.world.rooms().includes(first.room)) scene.showRoom(first.room, true);
 
   const setView = () => { ui.view = scene.view; ui.renderView(); };
+  setView();
   ui.onView = (v) => {
     if (v.mode === "all") scene.showAll();
     else if (v.mode === "room") scene.showRoom(v.name);
@@ -62,7 +67,7 @@ async function boot() {
         dirty = false;
         ui.renderRoster();
         ui.renderView();
-        if (!ui.build.on) ui.renderLog();
+        ui.renderLog();
       }
     }
   });
@@ -120,12 +125,13 @@ async function boot() {
     } else if (b.tool === "room") {
       const p = ROOM_PRESETS.find((r) => r.id === b.room)!;
       gh = { kind: "rect", x: tx, y: ty, w: p.w, h: p.h, ok: true };
+    } else if (b.tool === "turn") {
+      const f = w.furnitureAt(tx, ty);
+      if (f) gh = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: true };
     } else if (b.tool === "erase") {
       const f = w.furnitureAt(tx, ty);
       if (f) {
-        const def = FURNITURE_BY_ID[f.def];
         gh = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: false };
-        void def;
       } else if (edge.d < 0.2 && w.wall(edge.x, edge.y, edge.dir)) gh = { kind: "edge", x: edge.x, y: edge.y, dir: edge.dir, ok: false };
       else gh = { kind: "tile", x: tx, y: ty, ok: !w.tile(tx, ty) };
     }
@@ -143,6 +149,9 @@ async function boot() {
       else w.setWall(edge.x, edge.y, edge.dir, { kind, style: b.wallStyle });
     } else if (b.tool === "furniture") {
       if (!w.addFurniture(b.furniture, tx, ty, b.rot)) return;
+    } else if (b.tool === "turn") {
+      const f = w.furnitureAt(tx, ty);
+      if (f) f.back = !f.back;
     } else if (b.tool === "room") {
       const p = ROOM_PRESETS.find((r) => r.id === b.room)!;
       const name = stampPreset(w, p, tx, ty);

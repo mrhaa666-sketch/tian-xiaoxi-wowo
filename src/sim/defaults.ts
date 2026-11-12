@@ -61,7 +61,7 @@ export function sampleCharacters(): CharacterData[] {
 - 喜欢：甜食、下雨天、给植物浇水
 - 和阿槐是室友，觉得阿槐太吵，但其实很依赖他`,
     schedule: SCHEDULE_TEMPLATE,
-    pos: { x: 1.5, y: 5.5 },
+    pos: { x: 1.5, y: 8.5 },
     appearance: { skin: "#ffe0cc", hair: "#6b4532", hairStyle: 1, outfit: "#9fd3a8", accent: "#ffffff", eyes: "#3a5a7a" },
   });
   const b = newCharacter({
@@ -80,7 +80,7 @@ export function sampleCharacters(): CharacterData[] {
 18:00 做晚饭
 20:00 看电视或者打游戏
 01:00 睡觉`,
-    pos: { x: 5.5, y: 5.5 },
+    pos: { x: 5.5, y: 8.5 },
     appearance: { skin: "#f6d2b8", hair: "#2d3142", hairStyle: 0, outfit: "#f7c873", accent: "#2d3142", eyes: "#2d2a32" },
   });
   a.relations[b.id] = { affinity: 25, note: "吵闹的室友" };

@@ -113,7 +113,7 @@ export class Scene {
 
   zoomAt(factor: number, sx: number, sy: number) {
     this.camTarget = null;
-    const z = Math.min(2.2, Math.max(0.25, this.zoom * factor));
+    const z = Math.min(2.4, Math.max(0.12, this.zoom * factor));
     const k = z / this.zoom;
     this.camera.x = sx - (sx - this.camera.x) * k;
     this.camera.y = sy - (sy - this.camera.y) * k;
@@ -271,14 +271,17 @@ export class Scene {
   // ———————————————————— 视角：全景 / 单间 ————————————————————
 
   /** 世界像素范围铺满画面（留出界面占用的边距） */
+  /** 画面上被界面挡住的边距，由界面层提供 */
+  insets: () => { top: number; bottom: number; left: number; right: number } = () => ({ top: 80, bottom: 140, left: 8, right: 8 });
+
+  /** 世界像素范围铺满画面中没被界面挡住的部分 */
   private fitRect(x0: number, y0: number, x1: number, y1: number, instant = false) {
     const sw = this.app.screen.width, sh = this.app.screen.height;
-    const narrow = sw < 760;
-    const padL = narrow ? 12 : 250, padR = narrow ? 12 : this.selected ? 370 : 24, padT = 76, padB = narrow ? 120 : 30;
-    const aw = Math.max(100, sw - padL - padR), ah = Math.max(100, sh - padT - padB);
+    const ins = this.insets();
+    const aw = Math.max(100, sw - ins.left - ins.right), ah = Math.max(100, sh - ins.top - ins.bottom);
     const zoom = Math.min(1.6, aw / (x1 - x0), ah / (y1 - y0));
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    const t = { zoom, x: padL + aw / 2 - cx * zoom, y: padT + ah / 2 - cy * zoom };
+    const t = { zoom, x: ins.left + aw / 2 - cx * zoom, y: ins.top + ah / 2 - cy * zoom };
     if (instant) { this.zoom = t.zoom; this.camera.x = t.x; this.camera.y = t.y; this.camera.scale.set(t.zoom); this.camTarget = null; }
     else this.camTarget = t;
   }
@@ -554,6 +557,12 @@ export class Scene {
       b.bg.poly([-6, by + th + pad * 2, 6, by + th + pad * 2, 0, by + th + pad * 2 + 8]).fill(0xffffff);
       b.text.visible = true;
       b.emote.position.set(0, by - 2);
+      // 气泡别超出屏幕左右边缘
+      const half = tw / 2 + pad + 6, sw = this.app.screen.width;
+      const shift = Math.min(0, sw - (b.box.x + half)) + Math.max(0, half - b.box.x);
+      if (shift) { b.text.x += shift; b.bg.clear(); if (b.name.visible) { const nw = b.name.width + 12; b.bg.roundRect(-nw / 2, b.name.y - 2, nw, 18, 9).fill({ color: sel ? 0x3f7f86 : 0x2e2a33, alpha: 0.85 }); }
+        b.bg.roundRect(-tw / 2 - pad + shift, by, tw + pad * 2, th + pad * 2, 10).fill({ color: 0xffffff, alpha: 0.96 }).stroke({ width: 1.5, color: 0xc9c2d6 });
+        b.bg.poly([-6, by + th + pad * 2, 6, by + th + pad * 2, 0, by + th + pad * 2 + 8]).fill(0xffffff); }
     } else {
       b.text.visible = false;
     }
