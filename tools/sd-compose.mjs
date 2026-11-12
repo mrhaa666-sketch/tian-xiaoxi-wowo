@@ -147,7 +147,6 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
   // 以默认姿势（说话）为基准，记下五官相对脸部皮肤范围的位置；其他姿势（比如抬头）按皮肤范围的变化把五官挪过去、压扁
   const ref = manifest.emotionBody.normal;
   const ratio = {};
-  let refSkin = null;
   const ordered = [ref, ...bodies.filter((b) => b !== ref)];
   for (const b of ordered) {
     const bodyFile = path.join(args.bodies, char, b + ".png");
@@ -159,7 +158,6 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
     const fcy = Math.round((hb.y - K * (Math.sin(rad) * vx + Math.cos(rad) * vy) - BB[1]) / bs);
     const mask = skinMask(body, fcx, fcy, 170);
     const skin = skinBox(mask);
-    if (b === ref) refSkin = skin;
     if (args.debug) { await sharp(mask, { raw: { width: 512, height: 512, channels: 1 } }).png().toFile(path.join(outDir, `_mask_${b}.png`)); console.log(b, "脸中心", fcx, fcy); }
     let headBox = null;
     for (const f of faces) {
@@ -187,17 +185,18 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
         .composite([{ input: scaled, left: left + rw, top: top + rh }]).png().toBuffer();
       let layer = await sharp(layerBig).extract({ left: rw, top: rh, width: 512, height: 512 }).raw().toBuffer();
       const c0 = alphaCentroid(layer);
-      if (b === ref) ratio[f] = { u: (c0.x - skin.x0) / skin.w, v: (c0.y - skin.y0) / skin.h };
-      else if (c0 && ratio[f] && refSkin) {
-        const kx = clamp(skin.w / refSkin.w, 0.85, 1.15), ky = clamp(skin.h / refSkin.h, 0.8, 1.15);
-        const tx = skin.x0 + ratio[f].u * skin.w, ty = skin.y0 + ratio[f].v * skin.h;
-        const W = Math.round(512 * kx), H = Math.round(512 * ky);
-        const res = await sharp(layer, { raw: { width: 512, height: 512, channels: 4 } }).resize(W, H, { fit: "fill" }).png().toBuffer();
-        const ox = Math.round(tx - c0.x * kx), oy = Math.round(ty - c0.y * ky);
-        const padded = await sharp({ create: { width: 512 + W * 2, height: 512 + H * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-          .composite([{ input: res, left: ox + W, top: oy + H }]).png().toBuffer();
-        layer = await sharp(padded).extract({ left: W, top: H, width: 512, height: 512 }).raw().toBuffer();
-        if (args.debug) console.log(b, f, "缩放", kx.toFixed(2), ky.toFixed(2), "偏移", Math.round(tx - c0.x), Math.round(ty - c0.y));
+      // 抬头、低头时，脸会被压扁、上下移动，五官跟着下巴走：记下基准姿势里五官到下巴的距离，其他姿势照这个距离摆
+      const chin = skin.y0 + skin.h;
+      if (b === ref) ratio[f] = { dy: chin - c0.y };
+      else if (c0 && ratio[f]) {
+        const extra = Number(args[`dy-${id}-${b}`] ?? 0); // 需要时可以手动微调
+        const shift = Math.round(chin - ratio[f].dy - c0.y + extra);
+        if (shift) {
+          const padded = await sharp({ create: { width: 512, height: 512 + 200, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+            .composite([{ input: await sharp(layer, { raw: { width: 512, height: 512, channels: 4 } }).png().toBuffer(), left: 0, top: 100 + shift }]).png().toBuffer();
+          layer = await sharp(padded).extract({ left: 0, top: 100, width: 512, height: 512 }).raw().toBuffer();
+        }
+        if (args.debug && f === "face_normal") console.log(id, b, "下巴", chin, "向下移", shift);
       }
       for (let p = 0; p < 512 * 512; p++) layer[p * 4 + 3] = Math.round((layer[p * 4 + 3] * mask[p]) / 255);
       const faceLayer = await sharp(layer, { raw: { width: 512, height: 512, channels: 4 } }).png().toBuffer();
