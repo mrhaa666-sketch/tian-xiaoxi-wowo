@@ -1,6 +1,7 @@
 // 场景渲染：地板、墙、家具、食物、角色、气泡，以及镜头（拖动、缩放）。
-import { Application, Container, FillGradient, FillPattern, Graphics, Matrix, Sprite, Text, type Texture } from "pixi.js";
+import { Application, Container, FillGradient, FillPattern, Graphics, Matrix, Sprite, Text, Texture } from "pixi.js";
 import { currentHour, daylightAt, type Daylight } from "./daylight";
+import { spriteUrl } from "./spriteStore";
 
 /** 文字按屏幕的实际清晰度渲染，不然在手机上会发糊、有颗粒 */
 const TEXT_RES = Math.min(3, Math.max(2, window.devicePixelRatio || 1));
@@ -400,7 +401,7 @@ export class Scene {
     const foods = foodItems.map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
     const art = this.furnitureTexture(f, !!lying);
     const foodTex = foodItems.map((x) => getTexture("food", `food_${x.kind}`));
-    const stateKey = [this.game.settings.wallMode, f.x, f.y, f.rot, f.back ? 1 : 0, f.flip ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
+    const stateKey = [this.game.settings.wallMode, f.x, f.y, f.rot, f.back ? 1 : 0, f.flip ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", lying ? (this.sleeperHeadTexture(lying, lying.run?.interaction?.id !== "bath") ? 1 : 0) : 0, foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
     let v = this.furnitureViews.get(f.uid);
     if (v && v.stateKey === stateKey) return;
     if (!v) {
@@ -501,7 +502,43 @@ export class Scene {
   }
 
   /** 躺在床上/浴缸里的人：画一个小脑袋（以后可以换成角色包里的头像） */
-  private drawSleeperHead(parent: Container, c: Character, x: number, y: number) {
+  /** 有立绘的角色躺下 / 泡澡时露出来的头：用自己的头像（睡觉闭眼，泡澡开心） */
+  private headTex = new Map<string, Texture | null>();
+  private sleeperHeadTexture(c: Character, sleeping: boolean): Texture | null | undefined {
+    if (!c.d.sprites) return undefined;
+    const key = `${c.d.sprites}/${sleeping ? "sleepy" : "happy"}`;
+    if (this.headTex.has(key)) return this.headTex.get(key)!;
+    this.headTex.set(key, null);
+    const img = new Image();
+    img.src = spriteUrl(c.d.sprites, `avatar_${sleeping ? "sleepy" : "happy"}.png`);
+    img.decode().then(() => {
+      const t = Texture.from(img);
+      t.source.autoGenerateMipmaps = true;
+      t.source.updateMipmaps();
+      this.headTex.set(key, t);
+    }).catch(() => {
+      // 没有这个表情就用平常的头像
+      const alt = new Image();
+      alt.src = spriteUrl(c.d.sprites!, "avatar_normal.png");
+      alt.decode().then(() => this.headTex.set(key, Texture.from(alt))).catch(() => {});
+    });
+    return null;
+  }
+
+  private drawSleeperHead(parent: Container, c: Character, x: number, y: number, size = 52) {
+    const sleeping = c.run?.interaction?.id !== "bath";
+    const tex = this.sleeperHeadTexture(c, sleeping);
+    if (tex !== undefined) {
+      // 有立绘：头像还没加载好就先不画，加载好后会重画
+      if (!tex) return;
+      const sp = new Sprite(tex);
+      sp.anchor.set(0.5, 0.62);
+      // 泡澡时头露在水面上，比躺在枕头上的位置高一些
+      sp.position.set(x, sleeping ? y : y - size * 0.35);
+      sp.scale.set(size / tex.width);
+      parent.addChild(sp);
+      return;
+    }
     const g = new Graphics();
     const hair = hex(c.d.appearance.hair), skin = hex(c.d.appearance.skin);
     g.circle(x, y, 15).fill(hair).stroke({ width: 2, color: 0x5a4a44, alpha: 0.8 });
