@@ -68,10 +68,10 @@ export function stampPreset(world: World, p: RoomPreset, ox: number, oy: number,
 }
 
 /** 给一块区域的边缘补墙：边的另一侧没有地板、或属于别的房间时就砌墙。已有的门窗保留。 */
-export function autoWalls(world: World, ox: number, oy: number, w: number, h: number, style: string) {
+export function autoWalls(world: World, ox: number, oy: number, w: number, h: number, style: string, keepExisting = false) {
   const put = (k: string, wall: Wall) => {
     const old = world.data.walls[k];
-    if (old && old.kind !== "wall") return;
+    if (old && (old.kind !== "wall" || keepExisting)) return;
     world.data.walls[k] = wall;
   };
   for (let x = ox; x < ox + w; x++) {
@@ -133,7 +133,7 @@ export function buildStarterHouse(world: World) {
   room(world, "卧室B", 4, 6, 5, 4, "carpet_lilac", "lilac", [{ def: "wardrobe", x: 0, y: 0 }, { def: "lamp_desk", x: 1, y: 0 }, { def: "bed_double", x: 3, y: 0 }, { def: "floor_cushion", x: 1, y: 2 }, { def: "beanbag", x: 0, y: 3 }, { def: "mirror_stand", x: 2, y: 3 }, { def: "plant_big", x: 4, y: 3 }]);
   for (let x = 0; x < 12; x++) for (let y = 10; y < 12; y++) world.setFloor(x, y, "grass", "院子");
   for (let x = 9; x < 12; x++) for (let y = 7; y < 10; y++) world.setFloor(x, y, "grass", "院子");
-  autoWalls(world, 0, 0, 12, 12, "cream");
+  autoWalls(world, 0, 0, 12, 12, "cream", true); // 只补缺的墙，不改各房间已有的墙纸
   // 门
   const door = (x: number, y: number, d: "N" | "W", style: string) => world.setWall(x, y, d, { kind: "door", style });
   door(6, 1, "W", "cream");  // 客厅 ↔ 厨房
