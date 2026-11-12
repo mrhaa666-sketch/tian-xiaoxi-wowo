@@ -3,6 +3,7 @@
 import { SKILL_CN, type CharacterData, type Emotion, type FurnitureInst, type Needs, type PlanStep, type Pose, type Skills } from "../core/types";
 import { dateKey } from "../core/time";
 import { emptyDay } from "./defaults";
+import { senseRoom, type RoomSense } from "./perception";
 import { FOOD_BY_ID, FURNITURE_BY_ID, type InteractionDef } from "../world/catalog";
 import type { Game } from "./game";
 
@@ -72,10 +73,30 @@ export class Character {
 
   // ———————————————————— 每帧更新 ————————————————————
 
+  /** 对所在房间的感受，每两秒更新一次 */
+  sense: RoomSense | null = null;
+  private senseAt = 0;
+  private lastRoom = "";
+  private noticed = new Map<string, number>(); // 注意到的事 → 时间，十分钟内不重复提
+
+  private perceive(now: number) {
+    if (now - this.senseAt < 2000) return;
+    this.senseAt = now;
+    this.sense = senseRoom(this.game, this);
+    // 走进一个新房间、停下来之后，才会注意到房间里的事
+    if (this.moving || this.sense.room === this.lastRoom) return;
+    this.lastRoom = this.sense.room;
+    const fresh = this.sense.notable.filter((t) => now - (this.noticed.get(t) ?? -1e9) > 10 * 60_000);
+    if (!fresh.length) return;
+    fresh.forEach((t) => this.noticed.set(t, now));
+    this.game.emit(this, `你走进${this.sense.room}，注意到：${fresh.join("；")}。`, 1);
+  }
+
   update(dt: number) {
     const now = performance.now();
     if (this.speech && now > this.speech.until) this.speech = null;
     if (this.emote && now > this.emote.until) this.emote = null;
+    this.perceive(now);
     this.updateNeeds(dt);
     if (!this.run && this.queue.length) this.startStep(this.queue.shift()!);
     if (this.run) this.updateRun(dt, now);
@@ -132,6 +153,8 @@ export class Character {
 
     // —— 心情慢慢靠向「当前状态应有的心情」 ——
     let target = 68;
+    // 待在舒服的房间里心情会好一点，又暗又乱的房间会差一点
+    if (this.sense) target += (this.sense.score - 55) * 0.15;
     if (n.hunger < 30) target -= 15;
     if (n.energy < 25) target -= 10;
     if (n.bladder < 20) target -= 12;

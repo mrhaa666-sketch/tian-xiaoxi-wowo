@@ -271,3 +271,30 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 .slider span:last-child { text-align: right; }
 .slider input { width: 100%; accent-color: var(--accent); }
 .seg button { white-space: nowrap; }
+
+/* 房间感知和想做的事 */
+.room-score { float: right; font-weight: 400; color: var(--accent-ink); }
+.sense { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+.sense-item { display: grid; grid-template-columns: 30px 1fr 24px; gap: 6px; align-items: center; font-size: 12px; }
+.sense-item .bar, .want .bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.sense-item .bar b, .want .bar b { display: block; height: 100%; border-radius: 4px; }
+.sense-item .v { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sense-note { font-size: 12px; color: #6f6678; background: #f8f4fa; border-radius: 10px; padding: 5px 10px; margin-top: 6px; }
+.wants { display: flex; flex-direction: column; gap: 8px; }
+.want { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px; }
+.want-why { font-size: 11px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; align-self: center; }
+.want .bar { grid-column: 1 / -1; height: 5px; }
+.want .bar b { background: linear-gradient(90deg, #f6b6c9, var(--accent)); }
+
+/* 更多设定 / 角色包 */
+details.more { margin: 14px 0 4px; border: 1px solid var(--line, #e5e0ea); border-radius: 14px; padding: 4px 12px 8px; background: rgba(255,255,255,.5); }
+details.more > summary { cursor: pointer; font-weight: 700; font-size: 14px; padding: 8px 0; list-style: none; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸ "; color: var(--muted); }
+details.more[open] > summary::before { content: "▾ "; }
+details.more > summary span { display: block; font-weight: 400; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.taste-chip.fav.like::before { content: "★ "; }
+.pack-row { display: flex; gap: 8px; margin-top: 12px; }
+.pack-row .btn { flex: 1; }
+.local-packs { display: flex; flex-wrap: wrap; gap: 6px; }
+.confirm-text, .dialog p { white-space: pre-line; }

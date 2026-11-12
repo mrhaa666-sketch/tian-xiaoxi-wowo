@@ -108,6 +108,30 @@ export interface Profile {
   dislikes: string[]; // 讨厌的食物 id
 }
 
+/** 可以提前写进角色包的设定，AI 和本地规则都会参考 */
+export interface Lore {
+  selfName: string;       // 自称，例如「我」「本小姐」
+  callPlayer: string;     // 怎么称呼主人，例如「主人」「你」「前辈」
+  speechStyle: string;    // 说话方式
+  catchphrases: string[]; // 口头禅
+  backstory: string;      // 过去的经历
+  goals: string;          // 想做到的事
+  fears: string;          // 害怕、在意的事
+  likesTopics: string;    // 喜欢聊的话题
+  dislikesTopics: string; // 不想聊的话题
+  habits: string;         // 生活习惯，例如「每天下午喝茶」「睡前一定要看书」
+  chronotype: "early" | "normal" | "night"; // 早起型 / 普通 / 夜猫子
+  sickBehavior: "rest" | "stubborn" | "clingy" | "normal"; // 生病时：乖乖休息 / 硬撑 / 撒娇找人照顾 / 看情况
+  conflictStyle: string;  // 闹矛盾时的样子
+  favoriteRoom: string;   // 最喜欢待的房间
+  favoriteFurniture: string[]; // 最喜欢用的家具 id
+  presetRelations: { name: string; affinity: number; note: string }[]; // 和其他角色（按名字）的初始关系
+  custom: { key: string; value: string }[]; // 其他自定义设定
+}
+
+export const CHRONOTYPE_CN: Record<Lore["chronotype"], string> = { early: "早起型", normal: "普通", night: "夜猫子" };
+export const SICK_CN: Record<Lore["sickBehavior"], string> = { rest: "乖乖休息", stubborn: "硬撑着继续做事", clingy: "撒娇找人照顾", normal: "看情况" };
+
 /** 今天的记录，每天零点清空 */
 export interface DayStats {
   date: string;
@@ -171,6 +195,7 @@ export interface CharacterData {
   schedule: string; // 玩家写的作息表
   appearance: Appearance;
   profile: Profile;
+  lore: Lore;
   traits: Traits;
   skills: Skills;
   needs: Needs;

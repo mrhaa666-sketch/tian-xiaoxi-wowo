@@ -11,6 +11,7 @@ async function boot() {
   game.newsProvider = getNews;
   const brain = new Brain(game);
   const ui = new UI(document.getElementById("app")!, game, brain);
+  void ui.loadLocalPacks();
   const scene = new Scene(game);
   scene.insets = () => ui.insets();
   await scene.init(ui.stage);

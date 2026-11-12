@@ -1,5 +1,5 @@
 // 新存档的默认数据：两个示例角色、默认设置。
-import type { Appearance, CharacterData, DayStats, Needs, Profile, Settings, Skills, Traits } from "../core/types";
+import type { Appearance, CharacterData, DayStats, Lore, Needs, Profile, Settings, Skills, Traits } from "../core/types";
 import { dateKey } from "../core/time";
 
 export const PERSONA_TEMPLATE = `（写下这个角色是什么样的人，AI 会按这段文字扮演 TA）
@@ -36,6 +36,11 @@ export function randomAppearance(): Appearance {
 export const emptyDay = (): DayStats => ({ date: dateKey(new Date()), meals: 0, sleepMin: 0, workMin: 0, funMin: 0, socialMin: 0, toilet: 0, showered: false });
 const defaultTraits = (): Traits => ({ extraversion: 50, conscientiousness: 50, agreeableness: 50, neuroticism: 50, openness: 50 });
 const defaultSkills = (): Skills => ({ cooking: 1, music: 0, art: 0, gaming: 1, study: 1, fitness: 1 });
+export const defaultLore = (): Lore => ({
+  selfName: "我", callPlayer: "主人", speechStyle: "", catchphrases: [], backstory: "", goals: "", fears: "",
+  likesTopics: "", dislikesTopics: "", habits: "", chronotype: "normal", sickBehavior: "normal", conflictStyle: "",
+  favoriteRoom: "", favoriteFurniture: [], presetRelations: [], custom: [],
+});
 const defaultProfile = (): Profile => ({ age: 20, birthday: "", job: "", hobbies: "", likes: [], dislikes: [] });
 
 export function newCharacter(partial: Partial<CharacterData> & { name: string }): CharacterData {
@@ -60,6 +65,7 @@ export function newCharacter(partial: Partial<CharacterData> & { name: string })
 /** 补齐缺少的字段（旧存档、新加的变量） */
 export function normalizeCharacter(d: CharacterData): CharacterData {
   d.profile = { ...defaultProfile(), ...d.profile };
+  d.lore = { ...defaultLore(), ...d.lore };
   d.traits = { ...defaultTraits(), ...d.traits };
   d.skills = { ...defaultSkills(), ...d.skills };
   const base: Needs = { hunger: 80, energy: 80, bladder: 80, hygiene: 85, fun: 70, social: 60, comfort: 70, mood: 70, health: 100 };
@@ -84,6 +90,14 @@ export function sampleCharacters(): CharacterData[] {
     profile: { age: 20, birthday: "03-14", job: "自由插画师", hobbies: "画画、给植物浇水、下雨天发呆", likes: ["cake", "pudding", "tea"], dislikes: ["curry"] },
     traits: { extraversion: 30, conscientiousness: 85, agreeableness: 70, neuroticism: 60, openness: 65 },
     skills: { cooking: 2, music: 1, art: 6.5, gaming: 1, study: 4, fitness: 1.5 },
+    lore: {
+      ...defaultLore(), selfName: "我", callPlayer: "主人", speechStyle: "句子短，语气温和，偶尔小声吐槽", catchphrases: ["……这样啊。", "再画一点就好。"],
+      backstory: "高中开始在网上发插画，大学没读完就开始接稿，和阿槐是通过合租认识的。", goals: "想出一本自己的画集。", fears: "交不上稿、让别人失望。",
+      likesTopics: "画画、下雨、甜点", dislikesTopics: "催稿、被问什么时候找正经工作", habits: "每天下午喝一杯红茶；画画时不喜欢被打扰。",
+      chronotype: "night", sickBehavior: "stubborn", conflictStyle: "不吵，会沉默，躲回自己房间，过一会儿自己消气。",
+      favoriteRoom: "书房", favoriteFurniture: ["desk", "easel", "plant"],
+      custom: [{ key: "画风", value: "水彩风的风景插画" }],
+    },
   });
   const b = newCharacter({
     name: "阿槐",
@@ -106,6 +120,13 @@ export function sampleCharacters(): CharacterData[] {
     profile: { age: 21, birthday: "08-02", job: "大学生", hobbies: "打游戏、做饭、看新闻发表奇怪的看法", likes: ["ramen", "curry", "dumplings"], dislikes: ["porridge"] },
     traits: { extraversion: 85, conscientiousness: 30, agreeableness: 60, neuroticism: 25, openness: 70 },
     skills: { cooking: 5, music: 2, art: 0.5, gaming: 7, study: 2.5, fitness: 3 },
+    lore: {
+      ...defaultLore(), selfName: "我", callPlayer: "老大", speechStyle: "话多，爱用感叹号，喜欢开玩笑", catchphrases: ["包在我身上！", "饿了饿了！"],
+      backstory: "从小地方来城里读大学，在家里排行老大，习惯照顾人。", goals: "想开一家自己的小饭馆。", fears: "一个人待着太安静。",
+      likesTopics: "游戏、美食、八卦新闻", dislikesTopics: "期末考试", habits: "早上起不来；做饭时一定要放音乐。",
+      chronotype: "night", sickBehavior: "clingy", conflictStyle: "当场就吵，但吵完很快就忘了，会主动找台阶下。",
+      favoriteRoom: "客厅", favoriteFurniture: ["stove", "game_tv", "sofa"],
+    },
   });
   a.relations[b.id] = { affinity: 25, note: "吵闹的室友" };
   b.relations[a.id] = { affinity: 35, note: "认真过头的室友" };

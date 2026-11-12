@@ -1,7 +1,6 @@
 // 本地模拟大脑：没有填 API Key、AI 被限流或出错时，用简单规则让角色继续生活。
 import type { Emotion, PlanStep } from "../core/types";
-import { currentScheduleItem, parseSchedule, periodOf } from "../core/time";
-import { FURNITURE_BY_ID } from "../world/catalog";
+import { pickOption, scoreOptions } from "../sim/autonomy";
 import type { Character } from "../sim/character";
 import type { Game, GameEvent } from "../sim/game";
 
@@ -16,21 +15,12 @@ export interface Decision {
 
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
-function find(game: Game, c: Character, def: string, interaction?: string): PlanStep | null {
-  const list = game.world.data.furniture.filter((f) => f.def === def && !game.occupantOf(f.uid));
-  if (!list.length) return null;
-  list.sort((a, b) => Math.hypot(a.x - c.d.pos.x, a.y - c.d.pos.y) - Math.hypot(b.x - c.d.pos.x, b.y - c.d.pos.y));
-  const it = interaction ?? FURNITURE_BY_ID[def].interactions[0]?.id;
-  return { do: "use", target: list[0].uid, interaction: it };
-}
 
 const STUBBORN = /逞强|硬撑|工作狂|责任|认真|不服输/;
 
 export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decision {
   const n = c.d.needs;
-  const period = periodOf(new Date());
   const plan: PlanStep[] = [];
-  let thought = "";
   let emotion: Emotion = n.mood > 70 ? "happy" : n.mood < 35 ? "sad" : "normal";
 
   // 先回应别人跟自己说的话
@@ -49,84 +39,33 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
   }
   const bed = events.find((e) => e.text.includes("赶回了床上"));
   if (bed) {
-    plan.push({ do: "tell_player", line: STUBBORN.test(c.d.persona) ? "……知道了，就躺一会儿。" : "好，我乖乖躺着。" });
+    const sb = c.d.lore.sickBehavior;
+    plan.push({ do: "tell_player", line: sb === "stubborn" || STUBBORN.test(c.d.persona) ? "……知道了，就躺一会儿。" : sb === "clingy" ? `${c.d.lore.callPlayer || "主人"}陪我一会儿嘛……` : "好，我乖乖躺着。" });
     return { thought: "被主人赶回床上了。", emotion: "shy", plan };
   }
 
-  if (c.d.illness) {
-    emotion = "sick";
-    if (STUBBORN.test(c.d.persona) && Math.random() < 0.6) {
-      const w = find(game, c, "desk", "work");
-      if (w) {
-        plan.push({ ...w, minutes: 60 }, { do: "say", line: "咳……再做一点就好。" });
-        return { thought: "这点小病，先把事情做完再说。", emotion, plan };
-      }
-    }
-    const med = find(game, c, "medicine");
-    if (med && c.d.illness.severity > 50) plan.push(med);
-    const rest = find(game, c, "bed", "rest");
-    if (rest) plan.push({ ...rest, minutes: 90 });
-    return { thought: "头好晕，还是躺一下吧。", emotion, plan };
+  // 其余的事交给自主打分：需求、性格、爱好、作息、喜欢的家具、距离都考虑在内
+  const opts = scoreOptions(game, c);
+  const choice = pickOption(opts);
+  if (c.d.illness) emotion = "sick";
+  else if (c.d.stress > 70) emotion = "sad";
+  if (!choice) return { thought: "发会儿呆吧。", emotion, plan: [{ do: "idle", minutes: 2 }] };
+  const step = { ...choice.step };
+  if (step.do === "talk") {
+    const other = game.byId(step.target ?? "");
+    const lines = ["你在干嘛呀？", "今天过得怎么样？", "要不要一起吃点东西？", "好无聊啊。", ...c.d.lore.catchphrases];
+    step.line = pick(lines);
+    return { thought: `想找${other?.name ?? "人"}说说话。`, emotion, plan: [step] };
   }
-
-  const cur = currentScheduleItem(parseSchedule(c.d.schedule), new Date())?.text ?? "";
-  const lateNight = period === "深夜" && !/游戏|熬夜/.test(cur);
-
-  if (n.bladder < 25) {
-    const t = find(game, c, "toilet", "use");
-    if (t) return { thought: "要去一下厕所。", emotion, plan: [t] };
-  }
-  if (n.energy < 25 || lateNight || /睡/.test(cur)) {
-    const s = find(game, c, "bed", "sleep");
-    if (s) {
-      plan.push({ ...s, minutes: n.energy < 25 || lateNight ? 300 : 60 });
-      return { thought: "好困，睡觉吧。", emotion: "sleepy", plan };
-    }
-  }
-  if (n.hunger < 35 || (/饭|早餐|午餐|晚餐/.test(cur) && n.hunger < 70)) {
-    if (game.findFoodFor(c)) plan.push({ do: "eat", minutes: 10 });
-    else if (Math.random() < 0.5) {
-      const cook = find(game, c, "stove", "cook");
-      if (cook) plan.push({ ...cook, minutes: 20 }, { do: "eat", minutes: 10 });
-    }
-    if (!plan.length) {
-      const snack = find(game, c, "fridge", "snack");
-      if (snack) plan.push(snack);
-    }
-    if (plan.length) return { thought: "肚子饿了。", emotion, plan };
-  }
-  if (n.hygiene < 35 || /洗澡/.test(cur)) {
-    const b = find(game, c, "bathtub", "bath");
-    if (b) return { thought: "该洗个澡了。", emotion, plan: [{ ...b, minutes: 20 }] };
-  }
-  if (c.d.stress > 70 || n.fun < 25) {
-    // 压力大或者无聊：找点喜欢的事做
-    const opts = [find(game, c, "sofa", "sit"), find(game, c, "desk", "game"), find(game, c, "tv", "watch"), find(game, c, "upright_piano", "piano"), find(game, c, "easel", "paint"), find(game, c, "bathtub", "bath")].filter(Boolean) as PlanStep[];
-    if (opts.length) return { thought: c.d.stress > 70 ? "压力好大，想放松一下。" : "好无聊，找点事做。", emotion: c.d.stress > 70 ? "sad" : emotion, plan: [{ ...pick(opts), minutes: 30 }] };
-  }
-  if (n.social < 35 * (0.5 + c.d.traits.extraversion / 100) && game.chars.length > 1 && Math.random() < 0.7) {
-    const other = pick(game.chars.filter((o) => o !== c));
-    plan.push({ do: "talk", target: other.id, line: pick(["你在干嘛呀？", "今天过得怎么样？", "要不要一起吃点东西？", "好无聊啊。"]) });
-    return { thought: `想找${other.name}说说话。`, emotion, plan };
-  }
-  if (/工作|上课|网课|学习/.test(cur)) {
-    const w = find(game, c, "desk", "work");
-    if (w) return { thought: "按计划该干正事了。", emotion, plan: [{ ...w, minutes: 60 }] };
-  }
-
-  const fun: (PlanStep | null)[] = [
-    find(game, c, "tv", Math.random() < 0.3 ? "news" : "watch"),
-    find(game, c, "bookshelf", "read"),
-    find(game, c, "desk", Math.random() < 0.5 ? "game" : "browse"),
-    find(game, c, "plant", "water"),
-    find(game, c, "sofa", "sit"),
-    { do: "wander" },
-    { do: "idle", minutes: 2 },
-  ];
-  const choice = pick(fun.filter(Boolean) as PlanStep[]);
-  plan.push({ ...choice, minutes: choice.minutes ?? 15 + Math.random() * 20 });
-  thought = pick(["做点什么好呢。", "随便打发一下时间吧。", "今天还挺平静的。", "有点无聊。"]);
-  return { thought, emotion, plan };
+  const thoughts: Record<string, string[]> = {
+    肚子饿: ["肚子饿了。", "先吃点东西吧。"], 困了: ["好困……", "该睡了。"], 想上厕所: ["要去一下厕所。"], 想洗干净: ["身上黏黏的，去洗洗。"],
+    无聊: ["好无聊，找点事做。", "来点有意思的吧。"], 想坐一会儿: ["站累了，坐一会儿。"], 身体不舒服: ["头好晕，还是躺一下吧。"],
+    该干正事了: ["按计划该干正事了。"], 想把事情做完: ["咳……再做一点就好。"], 作息上写着: ["到点了。"], 喜欢做的事: ["做点喜欢的事吧。"], 最喜欢的家具: ["还是这里最舒服。"],
+  };
+  const thought = pick(thoughts[choice.why] ?? ["做点什么好呢。", "随便打发一下时间吧。"]);
+  const plan2: PlanStep[] = [step];
+  if (choice.why === "想把事情做完") plan2.push({ do: "say", line: pick(["咳……再做一点就好。", ...c.d.lore.catchphrases]) });
+  return { thought, emotion, plan: plan2 };
 }
 
 export function mockChat(c: Character, text: string): { reply: string; emotion: Emotion; plan: PlanStep[] } {

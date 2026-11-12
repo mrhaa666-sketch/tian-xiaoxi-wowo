@@ -2,7 +2,7 @@
 // 角色详情、建造、动态从底部弹出（抽屉）；聊天、设置、编辑角色是全屏页面。
 // 电脑上运行时，整个游戏显示在屏幕中央一个手机大小的框里。
 import type { Brain } from "../ai/brain";
-import { EMOTION_CN, NEED_CN, NEED_ORDER, SKILL_CN, TRAIT_CN, type CharacterData, type Needs, type Skills, type Traits } from "../core/types";
+import { CHRONOTYPE_CN, EMOTION_CN, NEED_CN, SICK_CN, type Lore, NEED_ORDER, SKILL_CN, TRAIT_CN, type CharacterData, type Needs, type Skills, type Traits } from "../core/types";
 import { describeNow, hhmm } from "../core/time";
 import type { Character } from "../sim/character";
 import { PERSONA_TEMPLATE, SCHEDULE_TEMPLATE, defaultSettings, newCharacter, randomAppearance } from "../sim/defaults";
@@ -11,6 +11,8 @@ import { FLOORS, FOODS, FURNITURE, WALL_STYLES } from "../world/catalog";
 import { ROOM_PRESETS } from "../world/presets";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
+import { scoreOptions } from "../sim/autonomy";
+import { exportPack, importPack } from "../sim/pack";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -246,9 +248,74 @@ export class UI {
       return `<button class="person" data-id="${c.id}">${this.avatar(c.d, 48)}
         <div class="p-main"><div class="p-name">${esc(c.name)}${c.d.illness ? " 🤒" : ""}</div><div class="p-act">${esc(c.room)} · ${esc(c.d.activity)}</div><div class="minibars">${bars}</div></div></button>`;
     }).join("");
-    body.innerHTML = `<div class="sheet-head"><h2>角色</h2><button class="btn primary small" id="p-add">＋ 新角色</button></div><div class="people">${cards}</div>`;
+    const local = this.localPacks.length ? `<h4 class="sec">本地角色包（packs 文件夹）</h4><div class="local-packs">${this.localPacks.map((x, i) => `<button class="btn small" data-local="${i}">＋ ${esc(x.name)}</button>`).join("")}</div>` : "";
+    body.innerHTML = `<div class="sheet-head"><h2>角色</h2><button class="btn primary small" id="p-add">＋ 新角色</button></div><div class="people">${cards}</div>
+      <div class="pack-row"><button class="btn small" id="p-import">导入角色包</button><button class="btn small" id="p-export">导出全部角色</button>
+</div>${local}`;
     body.querySelectorAll<HTMLElement>(".person").forEach((el) => (el.onclick = () => this.select(el.dataset.id!)));
     body.querySelector<HTMLElement>("#p-add")!.onclick = () => this.openEditor(null);
+    body.querySelector<HTMLElement>("#p-import")!.onclick = () => this.packFile().click();
+    body.querySelector<HTMLElement>("#p-export")!.onclick = () => this.downloadPack(this.game.chars.map((c) => c.d), "全部角色");
+    body.querySelectorAll<HTMLElement>("[data-local]").forEach((b) => (b.onclick = async () => {
+      const item = this.localPacks[Number(b.dataset.local)];
+      try {
+        const r = await fetch(`packs/${item.file}`);
+        if (!r.ok) throw new Error(String(r.status));
+        this.applyPack(await r.json());
+      } catch { this.flash(`读取 ${item.file} 失败`); }
+    }));
+  }
+
+  /** 选择角色包文件的输入框放在抽屉外面，抽屉刷新时不会被替换掉 */
+  private packFile() {
+    let el = document.getElementById("pack-file") as HTMLInputElement | null;
+    if (!el) {
+      el = document.createElement("input");
+      el.type = "file"; el.id = "pack-file"; el.accept = ".json,application/json"; el.hidden = true;
+      el.onchange = async () => {
+        const f = el!.files?.[0];
+        if (!f) return;
+        try { this.applyPack(JSON.parse(await f.text())); } catch { this.flash("这个文件不是有效的角色包（JSON 格式不对）"); }
+        el!.value = "";
+      };
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  /** packs/index.json 里列出的本地角色包，例如 [{"name":"小溪","file":"xiaoxi.json"}] */
+  private localPacks: { name: string; file: string }[] = [];
+  async loadLocalPacks() {
+    try {
+      const r = await fetch("packs/index.json");
+      if (!r.ok || !(r.headers.get("content-type") ?? "").includes("json")) return;
+      const list = await r.json();
+      if (Array.isArray(list)) this.localPacks = list.filter((x) => typeof x?.name === "string" && typeof x?.file === "string" && /^[\w\-.\u4e00-\u9fa5/]+\.json$/.test(x.file) && !x.file.includes(".."));
+    } catch { /* 没有本地角色包就算了 */ }
+  }
+
+  private applyPack(raw: unknown) {
+    const { added, problems } = importPack(this.game, raw);
+    if (added.length) {
+      this.game.log("player", `${added.join("、")}搬进来了`);
+      this.renderRoster();
+      this.game.save();
+    }
+    const msg = added.length ? `导入了 ${added.join("、")}` : "没有导入任何角色";
+    if (problems.length) this.confirm(`${msg}。\n\n${problems.join("\n")}`, () => {});
+    else this.flash(msg);
+  }
+
+  private downloadPack(chars: CharacterData[], label: string) {
+    const blob = new Blob([JSON.stringify(exportPack(this.game, chars), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `角色包-${label}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    this.flash("角色包已导出");
   }
 
   select(id: string | null) {
@@ -342,12 +409,28 @@ export class UI {
         <div class="big-stat"><b>${d.sleepDebt.toFixed(1)}<small>h</small></b><span>睡眠债</span><i style="--p:${Math.min(100, d.sleepDebt * 10)}%;--c:#6b9bf2"></i></div>
       </div>
       <h4 class="sec">需求</h4><div class="needs">${needs}</div>
+      ${this.senseHtml(c)}
       <h4 class="sec">今天</h4>
       <div class="today">
         <span>🍚 吃了 <b>${td.meals}</b> 顿</span><span>😴 睡了 <b>${h(td.sleepMin)}</b> 小时</span>
         <span>💼 工作 <b>${h(td.workMin)}</b> 小时</span><span>🎮 玩了 <b>${h(td.funMin)}</b> 小时</span>
         <span>💬 聊天 <b>${Math.round(td.socialMin)}</b> 句</span><span>🛁 ${td.showered ? "洗过澡了" : "还没洗澡"}</span>
       </div>${plan}`;
+  }
+
+  /** 所在房间的感觉 + 想做的事 */
+  private senseHtml(c: Character) {
+    const sn = c.sense;
+    const room = sn ? `<h4 class="sec">所在房间 · ${esc(sn.room)} <span class="room-score">舒服程度 ${sn.score}</span></h4>
+      <div class="sense">
+        ${[["美观", sn.beauty, "#f2a6c0"], ["明亮", sn.light, "#f2c14e"], ["热闹", sn.lively, "#8fb86b"], ["凌乱", sn.clutter, "#c9a27a"]].map(([n, v, col]) => `<div class="sense-item"><span>${n}</span><span class="bar"><b style="width:${v}%;background:${col}"></b></span><span class="v">${v}</span></div>`).join("")}
+      </div>
+      ${sn.people.length ? `<div class="sense-note">👥 这里还有 ${sn.people.map(esc).join("、")}</div>` : ""}
+      ${sn.notable.map((t) => `<div class="sense-note">👀 ${esc(t)}</div>`).join("")}` : "";
+    const wants = scoreOptions(this.game, c).slice(0, 4);
+    const max = Math.max(1, ...wants.map((w) => w.score));
+    const list = wants.map((w) => `<div class="want"><span class="want-l">${esc(w.label)}</span><span class="want-why">${esc(w.why)}</span><span class="bar"><b style="width:${(w.score / max) * 100}%"></b></span></div>`).join("");
+    return room + `<h4 class="sec">想做的事</h4><div class="wants">${list}</div>`;
   }
 
   /** 档案页：基本资料、性格、技能 */
@@ -581,6 +664,7 @@ export class UI {
   openEditor(c: Character | null) {
     const d: CharacterData = c ? c.d : newCharacter({ name: "", appearance: randomAppearance() });
     const a = d.appearance;
+    const l = d.lore;
     const p = this.page(`
       <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>${c ? "编辑" + esc(c.name) : "创建新角色"}</h2>
         <button class="btn small primary" id="e-save">${c ? "保存" : "搬进来"}</button></header>
@@ -602,6 +686,35 @@ export class UI {
         <div class="field"><label for="e-hobby">爱好</label><input id="e-hobby" value="${esc(d.profile.hobbies)}" placeholder="例如：打游戏、做饭" /></div>
         <div class="field"><label>口味</label><div class="help">点一下是喜欢（❤），再点一下是不爱吃（✕），再点取消。吃到喜欢的会特别开心。</div>
           <div class="taste">${FOODS.map((f) => { const st = d.profile.likes.includes(f.id) ? "like" : d.profile.dislikes.includes(f.id) ? "dislike" : ""; return `<button type="button" class="taste-chip ${st}" data-food="${f.id}">${esc(f.name)}</button>`; }).join("")}</div></div>
+        <details class="more">
+          <summary>更多设定（可选）<span>称呼、说话方式、背景故事、生病时的样子……写得越多越像 TA</span></summary>
+          <div class="grid2">
+            <div class="field"><label for="l-self">TA 怎么称呼自己</label><input id="l-self" value="${esc(l.selfName)}" maxlength="10" placeholder="例如：我、本小姐" /></div>
+            <div class="field"><label for="l-call">TA 怎么称呼你</label><input id="l-call" value="${esc(l.callPlayer)}" maxlength="10" placeholder="例如：主人、你" /></div>
+          </div>
+          <div class="field"><label for="l-speech">说话方式</label><input id="l-speech" value="${esc(l.speechStyle)}" placeholder="例如：句子很短，不爱用感叹号" /></div>
+          <div class="field"><label for="l-catch">口头禅</label><input id="l-catch" value="${esc(l.catchphrases.join("、"))}" placeholder="用顿号或逗号隔开，偶尔才会说" /></div>
+          <div class="field"><label for="l-back">背景故事</label><textarea id="l-back" style="min-height:70px" placeholder="TA 从哪里来，经历过什么">${esc(l.backstory)}</textarea></div>
+          <div class="grid2">
+            <div class="field"><label for="l-goals">目标 / 愿望</label><input id="l-goals" value="${esc(l.goals)}" /></div>
+            <div class="field"><label for="l-fears">害怕的东西</label><input id="l-fears" value="${esc(l.fears)}" /></div>
+            <div class="field"><label for="l-lt">喜欢聊的话题</label><input id="l-lt" value="${esc(l.likesTopics)}" /></div>
+            <div class="field"><label for="l-dt">不想聊的话题</label><input id="l-dt" value="${esc(l.dislikesTopics)}" /></div>
+          </div>
+          <div class="field"><label for="l-habits">生活习惯</label><input id="l-habits" value="${esc(l.habits)}" placeholder="例如：睡前一定要喝热牛奶" /></div>
+          <div class="grid2">
+            <div class="field"><label for="l-chrono">作息类型</label><select id="l-chrono">${(Object.keys(CHRONOTYPE_CN) as Lore["chronotype"][]).map((k) => `<option value="${k}" ${l.chronotype === k ? "selected" : ""}>${CHRONOTYPE_CN[k]}</option>`).join("")}</select></div>
+            <div class="field"><label for="l-sick">生病时</label><select id="l-sick">${(Object.keys(SICK_CN) as Lore["sickBehavior"][]).map((k) => `<option value="${k}" ${l.sickBehavior === k ? "selected" : ""}>${SICK_CN[k]}</option>`).join("")}</select></div>
+          </div>
+          <div class="field"><label for="l-conflict">吵架时会怎样</label><input id="l-conflict" value="${esc(l.conflictStyle)}" placeholder="例如：冷战，过一会儿自己来道歉" /></div>
+          <div class="field"><label for="l-room">最喜欢待的房间</label><select id="l-room"><option value="">没有特别喜欢的</option>${[...new Set([...this.game.world.rooms(), l.favoriteRoom].filter(Boolean))].map((r) => `<option ${l.favoriteRoom === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div>
+          <div class="field"><label>最喜欢的家具</label><div class="help">选中的家具 TA 会更常去用。</div>
+            <div class="taste">${FURNITURE.filter((f) => f.interactions.some((i) => i.id !== "toggle")).map((f) => `<button type="button" class="taste-chip fav ${l.favoriteFurniture.includes(f.id) ? "like" : ""}" data-fav="${f.id}">${esc(f.name)}</button>`).join("")}</div></div>
+          <div class="field"><label for="l-rel">和其他角色的初始关系</label><div class="help">每行一条：名字 | 好感（-100～100）| 备注。家里有这个人时才生效。</div>
+            <textarea id="l-rel" style="min-height:60px" placeholder="阿槐 | 40 | 从小一起长大">${esc(l.presetRelations.map((r) => `${r.name} | ${r.affinity} | ${r.note}`).join("\n"))}</textarea></div>
+          <div class="field"><label for="l-custom">其他设定</label><div class="help">每行一条「名称：内容」，想写什么都可以，会原样告诉 AI。</div>
+            <textarea id="l-custom" style="min-height:60px" placeholder="画风：水彩">${esc(l.custom.map((x) => `${x.key}：${x.value}`).join("\n"))}</textarea></div>
+        </details>
         <h3 class="group">性格</h3>
         <div class="help" style="margin-bottom:8px">性格会影响需求变化的快慢，也会告诉 AI 这个角色是什么样的人。</div>
         ${(Object.keys(TRAIT_CN) as (keyof Traits)[]).map((k) => `<div class="slider"><span>${TRAIT_CN[k][1]}</span><input type="range" min="0" max="100" step="5" data-trait="${k}" value="${d.traits[k]}" aria-label="${TRAIT_CN[k][1]}到${TRAIT_CN[k][2]}" /><span>${TRAIT_CN[k][2]}</span></div>`).join("")}
@@ -611,9 +724,12 @@ export class UI {
             ${[["skin", "肤色"], ["hair", "发色"], ["outfit", "衣服"], ["accent", "点缀"], ["eyes", "瞳色"]].map(([k, n]) => `<label>${n}<input type="color" data-color="${k}" value="${(a as unknown as Record<string, string>)[k]}" /></label>`).join("")}
             <label>发型<select id="e-hair">${["短发", "长发", "短发+发饰", "马尾"].map((n, i) => `<option value="${i}" ${a.hairStyle === i ? "selected" : ""}>${n}</option>`).join("")}</select></label>
           </div></div>
+        ${c ? `<button type="button" class="btn block" id="e-export">导出成角色包文件</button><div class="help" style="text-align:center;margin-top:6px">导出的是设定（不含聊天和记忆），可以发给别人或换设备导入。</div>` : ""}
       </div>`);
     const $ = <T extends HTMLElement>(s: string) => p.querySelector<T>(s)!;
     $("#e-fill").onclick = () => { $<HTMLTextAreaElement>("#e-schedule").value = SCHEDULE_TEMPLATE; };
+    p.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => (b.onclick = () => b.classList.toggle("like")));
+    if (c) $("#e-export").onclick = () => this.downloadPack([c.d], c.name);
     p.querySelectorAll<HTMLElement>(".taste-chip").forEach((b) => (b.onclick = () => {
       const st = b.classList.contains("like") ? "dislike" : b.classList.contains("dislike") ? "" : "like";
       b.classList.remove("like", "dislike");
@@ -635,6 +751,24 @@ export class UI {
       d.profile.likes = [...p.querySelectorAll<HTMLElement>(".taste-chip.like")].map((x) => x.dataset.food!);
       d.profile.dislikes = [...p.querySelectorAll<HTMLElement>(".taste-chip.dislike")].map((x) => x.dataset.food!);
       p.querySelectorAll<HTMLInputElement>("[data-trait]").forEach((i) => (d.traits[i.dataset.trait as keyof Traits] = Number(i.value)));
+      const v = (id: string) => $<HTMLInputElement>(id).value.trim();
+      l.selfName = v("#l-self"); l.callPlayer = v("#l-call"); l.speechStyle = v("#l-speech");
+      l.catchphrases = v("#l-catch").split(/[、,，\n]+/).map((x) => x.trim()).filter(Boolean).slice(0, 10);
+      l.backstory = v("#l-back"); l.goals = v("#l-goals"); l.fears = v("#l-fears");
+      l.likesTopics = v("#l-lt"); l.dislikesTopics = v("#l-dt"); l.habits = v("#l-habits"); l.conflictStyle = v("#l-conflict");
+      l.chronotype = v("#l-chrono") as Lore["chronotype"]; l.sickBehavior = v("#l-sick") as Lore["sickBehavior"];
+      l.favoriteRoom = v("#l-room");
+      l.favoriteFurniture = [...p.querySelectorAll<HTMLElement>("[data-fav].like")].map((x) => x.dataset.fav!);
+      l.presetRelations = v("#l-rel").split("\n").map((line) => line.split(/[|｜]/).map((x) => x.trim())).filter((q) => q[0])
+        .map(([name, aff, note]) => ({ name, affinity: Math.max(-100, Math.min(100, Number(aff) || 0)), note: note ?? "" }));
+      l.custom = v("#l-custom").split("\n").map((line) => line.split(/[:：]/)).filter((q) => q[0]?.trim())
+        .map(([key, ...rest]) => ({ key: key.trim(), value: rest.join("：").trim() }));
+      // 初始关系：对家里已有的人立刻生效（不覆盖已经玩出来的关系）
+      for (const r of l.presetRelations) {
+        const o = this.game.chars.find((x) => x.name === r.name && x.d !== d);
+        const cur = o && d.relations[o.id];
+        if (o && (!cur || (cur.affinity === 0 && cur.note === "刚认识"))) d.relations[o.id] = { affinity: r.affinity, note: r.note };
+      }
       p.close();
       if (c) {
         this.game.log("player", `修改了${name}的人设`);
