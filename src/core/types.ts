@@ -19,6 +19,7 @@ export interface FurnitureInst {
   y: number;
   rot: 0 | 1; // 0 = 正常占地，1 = 占地的长宽对调（横放/竖放）
   back?: boolean; // 背对镜头摆放（用 <素材名>_back.png）
+  flip?: boolean; // 左右镜像
   state?: Record<string, string | number | boolean>;
 }
 
@@ -187,6 +188,9 @@ export interface PlanStep {
 }
 
 export type Pose = "stand" | "walk" | "sit" | "lie" | "use" | "eat";
+/** 动作快慢：悠闲 / 平常 / 匆忙。影响走路速度和两件事之间歇多久 */
+export type Pace = "slow" | "normal" | "fast";
+export const PACE_CN: Record<Pace, string> = { slow: "慢悠悠", normal: "不紧不慢", fast: "急匆匆" };
 
 export interface CharacterData {
   id: string;

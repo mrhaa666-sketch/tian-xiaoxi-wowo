@@ -3,6 +3,10 @@ import type { Appearance, CharacterData, Lore, Profile, Skills, Traits } from ".
 import { FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
 import { defaultLore, newCharacter, randomAppearance } from "./defaults";
 import type { Game } from "./game";
+import { readSprites, saveSprites } from "../render/spriteStore";
+
+/** 角色包里自带的立绘：id 是立绘名，files 是「文件名 → data: 地址」 */
+export interface PackSprites { id: string; files: Record<string, string> }
 
 export const PACK_FORMAT = "wowo-character-pack";
 
@@ -15,7 +19,8 @@ export interface PackCharacter {
   traits?: Partial<Traits>;
   skills?: Partial<Skills>;
   appearance?: Partial<Appearance>;
-  sprites?: string;
+  /** 立绘：写立绘文件夹名（放在 packs/chars/ 里），或者直接把立绘图片打包进来 */
+  sprites?: string | PackSprites;
 }
 
 export interface CharacterPack {
@@ -24,8 +29,13 @@ export interface CharacterPack {
   characters: PackCharacter[];
 }
 
-/** 导出：只导出「设定」，不导出聊天记录、记忆这类游戏过程中产生的东西 */
-export function exportPack(game: Game, chars: CharacterData[]): CharacterPack {
+/** 导出：只导出「设定」和立绘，不导出聊天记录、记忆这类游戏过程中产生的东西 */
+export async function exportPack(game: Game, chars: CharacterData[]): Promise<CharacterPack> {
+  const sprites = new Map<string, PackSprites>();
+  for (const d of chars) if (d.sprites && !sprites.has(d.sprites)) {
+    const files = await readSprites(d.sprites);
+    if (files) sprites.set(d.sprites, { id: d.sprites, files });
+  }
   return {
     format: PACK_FORMAT,
     version: 1,
@@ -35,7 +45,7 @@ export function exportPack(game: Game, chars: CharacterData[]): CharacterPack {
       return {
         name: d.name, persona: d.persona, schedule: d.schedule, profile: d.profile,
         lore: { ...d.lore, presetRelations: rel.length ? rel : d.lore.presetRelations },
-        traits: d.traits, skills: d.skills, appearance: d.appearance, ...(d.sprites ? { sprites: d.sprites } : {}),
+        traits: d.traits, skills: d.skills, appearance: d.appearance, ...(d.sprites ? { sprites: sprites.get(d.sprites) ?? d.sprites } : {}),
       };
     }),
   };
@@ -45,6 +55,21 @@ const str = (v: unknown, max = 2000) => (typeof v === "string" ? v.slice(0, max)
 const num = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : undefined);
 const strList = (v: unknown, max = 20) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, max).map((x) => x.slice(0, 200)) : undefined);
 const pickDefined = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+
+const SPRITE_ID = /^[a-z0-9_-]{1,40}$/;
+function cleanSprites(v: unknown): PackCharacter["sprites"] {
+  if (typeof v === "string") return SPRITE_ID.test(v) ? v : undefined;
+  const o = v as { id?: unknown; files?: unknown } | null;
+  if (!o || typeof o.id !== "string" || !SPRITE_ID.test(o.id) || !o.files || typeof o.files !== "object") return undefined;
+  const files: Record<string, string> = {};
+  for (const [name, data] of Object.entries(o.files as Record<string, unknown>)) {
+    // 只收立绘图片和清单，文件名不能带路径
+    if (!/^[\w-]+\.(png|json)$/.test(name) || typeof data !== "string") continue;
+    if (!/^data:(image\/png|application\/json);base64,[A-Za-z0-9+/=]+$/.test(data)) continue;
+    files[name] = data;
+  }
+  return files["manifest.json"] ? { id: o.id, files } : o.id;
+}
 
 /** 把一个角色条目整理成安全的数据：类型不对、超出范围的值都丢掉或截断 */
 function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
@@ -82,13 +107,13 @@ function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
     skills: pickDefined({
       cooking: num(s.cooking, 0, 10), music: num(s.music, 0, 10), art: num(s.art, 0, 10), gaming: num(s.gaming, 0, 10), study: num(s.study, 0, 10), fitness: num(s.fitness, 0, 10),
     }),
-    sprites: typeof e.sprites === "string" && /^[a-z0-9_-]{1,40}$/.test(e.sprites) ? e.sprites : undefined,
+    sprites: cleanSprites(e.sprites),
     appearance: pickDefined({ skin: color(a.skin), hair: color(a.hair), outfit: color(a.outfit), accent: color(a.accent), eyes: color(a.eyes), hairStyle: num(a.hairStyle, 0, 3) }),
   };
 }
 
 /** 导入角色包（也接受只有一个角色的对象）。返回加进来的角色名和问题列表。 */
-export function importPack(game: Game, raw: unknown): { added: string[]; problems: string[] } {
+export async function importPack(game: Game, raw: unknown): Promise<{ added: string[]; problems: string[] }> {
   const problems: string[] = [];
   const root = (raw ?? {}) as Record<string, unknown>;
   const list: unknown[] = Array.isArray(root.characters) ? root.characters : Array.isArray(raw) ? raw : root.name ? [root] : [];
@@ -106,7 +131,8 @@ export function importPack(game: Game, raw: unknown): { added: string[]; problem
     const d = newCharacter({ name, persona: e.persona ?? "", schedule: e.schedule ?? "", appearance: { ...randomAppearance(), ...e.appearance } });
     d.profile = { ...d.profile, ...e.profile };
     d.lore = { ...defaultLore(), ...e.lore };
-    if (e.sprites) d.sprites = e.sprites;
+    if (typeof e.sprites === "string") d.sprites = e.sprites;
+    else if (e.sprites) { await saveSprites(e.sprites.id, e.sprites.files); d.sprites = e.sprites.id; }
     d.traits = { ...d.traits, ...e.traits };
     d.skills = { ...d.skills, ...e.skills };
     const t = game.world.randomTileIn();
@@ -119,7 +145,16 @@ export function importPack(game: Game, raw: unknown): { added: string[]; problem
       const target = renamed.get(r.name) ?? r.name;
       const other = game.chars.find((c) => c.name === target && c.id !== d.id);
       if (other) d.relations[other.id] = { affinity: r.affinity, note: r.note };
-      else problems.push(`${d.name}的设定里提到「${r.name}」，但家里没有这个角色，这条关系先不生效`);
+      else problems.push(`${d.name}的设定里提到「${r.name}」，等${r.name}搬进来以后这条关系会自动生效`);
+    }
+  }
+  // 反过来：早就住在家里的人，设定里提到了新来的人，也一并生效（不覆盖已经玩出来的关系）
+  for (const o of game.chars) {
+    if (added.includes(o.d)) continue;
+    for (const r of o.d.lore.presetRelations) {
+      const nd = added.find((d) => d.name === r.name);
+      const cur = nd && o.d.relations[nd.id];
+      if (nd && (!cur || (cur.affinity === 0 && ["刚认识", "新来的"].includes(cur.note)))) o.d.relations[nd.id] = { affinity: r.affinity, note: r.note };
     }
   }
   return { added: added.map((d) => d.name), problems };

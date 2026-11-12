@@ -16,6 +16,8 @@ export class Brain {
   private llm: LLM | null = null;
   private inFlight = new Set<string>();
   private lastDecision = new Map<string, number>();
+  /** 闲下来以后，歇到这个时间再决定下一件事（慢悠悠时歇得久，匆忙时几乎不歇） */
+  private restUntil = new Map<string, number>();
   private callTimes: number[] = [];
   private pauseUntil = 0;
   status: AIStatus = { mode: "mock", message: "本地模拟模式", callsLastMinute: 0, thinking: 0 };
@@ -51,11 +53,17 @@ export class Brain {
       const box = this.game.inbox.get(c.id) ?? [];
       const urgent = box.some((e) => e.priority >= 2);
       const last = this.lastDecision.get(c.id) ?? 0;
+      if (!c.idle) this.restUntil.delete(c.id);
+      else if (!this.restUntil.has(c.id)) {
+        const base = { slow: 28_000, normal: 14_000, fast: 4_000 }[c.pace];
+        this.restUntil.set(c.id, now + base * (0.7 + Math.random() * 0.6));
+      }
+      const rested = now >= (this.restUntil.get(c.id) ?? 0);
       const interval = this.game.settings.ai.decisionInterval * 1000;
       // 正在睡觉/工作这类长动作时，只有急事才会打断
       const busyLong = !!c.run && c.run.phase === "act" && c.run.endsAt - performance.now() > 30_000;
       if (Date.now() < c.forcedUntil && !urgent) continue;
-      const wantAI = urgent ? now - last > 3_000 : c.idle && now - last > interval;
+      const wantAI = urgent ? now - last > 3_000 : c.idle && rested && now - last > interval;
       if (wantAI && (!busyLong || box.some((e) => e.priority >= 3))) {
         if (this.canCall()) {
           void this.decide(c);
@@ -64,8 +72,8 @@ export class Brain {
       }
       // 没有 AI 可用、或额度暂时用完时，闲下来就用本地规则安排
       if (c.idle && (!this.llm || !this.canCall())) {
-        if (now - last > (this.llm ? 4_000 : 2_000)) this.decideLocally(c);
-      } else if (!this.llm && urgent && now - last > 1_500) {
+        if (rested && now - last > 4_000) this.decideLocally(c);
+      } else if (!this.llm && urgent && now - last > 3_500) {
         this.decideLocally(c);
       }
     }
@@ -146,6 +154,7 @@ export class Brain {
       thought: String(r.thought ?? "").slice(0, 120),
       emotion,
       plan,
+      pace: ["slow", "normal", "fast"].includes(r.pace as string) ? (r.pace as Decision["pace"]) : undefined,
       memory: String(r.memory ?? "").slice(0, 200),
       relation_changes: rc.filter((x) => x && typeof x.target === "string"),
       conflict: cf?.with && cf.reason ? { with: cf.with, reason: cf.reason } : undefined,
@@ -183,6 +192,7 @@ export class Brain {
       g.log("thought", dec.thought, c.id);
     }
     c.setEmotion(dec.emotion);
+    if (dec.pace) c.pace = dec.pace;
     if (dec.memory) this.remember(c, dec.memory, events.some((e) => e.priority >= 3) ? 2 : 1);
     for (const ch of dec.relation_changes ?? []) {
       const rel = c.d.relations[ch.target];

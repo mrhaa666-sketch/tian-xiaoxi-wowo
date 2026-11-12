@@ -26,6 +26,7 @@ export const DECISION_SCHEMA = {
     thought: { type: "string" },
     emotion: { type: "string", enum: EMOTIONS },
     plan: { type: "array", items: STEP_SCHEMA },
+    pace: { type: "string", enum: ["slow", "normal", "fast"] },
     memory: { type: "string" },
     relation_changes: {
       type: "array",
@@ -43,7 +44,7 @@ export const DECISION_SCHEMA = {
       required: ["with", "reason"],
     },
   },
-  required: ["thought", "emotion", "plan", "memory", "relation_changes", "conflict"],
+  required: ["thought", "emotion", "plan", "pace", "memory", "relation_changes", "conflict"],
 };
 
 export const CHAT_SCHEMA = {
@@ -85,6 +86,8 @@ export const DECISION_SYSTEM = `你是生活模拟游戏「恬小溪窝窝」里
 10. thought 是一句内心独白。memory 写一件值得长期记住的事，没有就留空。
 11. relation_changes 只在对某人的看法真的变了时填写，delta 在 -10 到 10 之间，target 填角色 id 或 "player"。
 12. conflict 只在你和某个角色真的产生了矛盾时填写（with 填对方 id，reason 写起因），否则两个字段都留空。
+13. pace 是你接下来做事的快慢：slow 慢悠悠（累了、放松、心情低落、没什么事）、normal 不紧不慢、fast 急匆匆（赶时间、很急、很兴奋）。按性格和此刻的状态决定，大多数时候是 normal 或 slow。慢的时候走路慢，做完一件事也会多歇一会儿。
+14. 像真人一样过日子：一件事通常做十几分钟到一两个小时，不要频繁地换来换去；闲下来时可以 idle 发会儿呆。
 
 ${ACTIONS_DOC}`;
 

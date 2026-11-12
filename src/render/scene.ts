@@ -383,7 +383,7 @@ export class Scene {
     const foods = foodItems.map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
     const art = this.furnitureTexture(f, !!lying);
     const foodTex = foodItems.map((x) => getTexture("food", `food_${x.kind}`));
-    const stateKey = [this.game.settings.wallMode, f.x, f.y, f.rot, f.back ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
+    const stateKey = [this.game.settings.wallMode, f.x, f.y, f.rot, f.back ? 1 : 0, f.flip ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
     let v = this.furnitureViews.get(f.uid);
     if (v && v.stateKey === stateKey) return;
     if (!v) {
@@ -442,7 +442,7 @@ export class Scene {
       v.box.zIndex = (f.y + h - 0.15) * 10;
       v.shadow.ellipse(0, 2, sw * 0.5, 9).fill({ color: 0x000000, alpha: 0.14 });
     }
-    const mirror = f.rot === 1 && w === 1 ? -1 : 1;
+    const mirror = (f.rot === 1 && w === 1 ? -1 : 1) * (f.flip ? -1 : 1);
     let topY = -sh; // 立牌顶面大概的位置，用来放食物
     if (art) {
       // 有素材图：按立牌宽度缩放，高度按图片比例
@@ -463,8 +463,8 @@ export class Scene {
       v.sprite.scale.set(k * mirror, k);
       topY = -art.tex.height * k * 0.62;
       // 有人躺着、但没有专门的「有人」图时，在床上叠一个小脑袋
-      if (lying && art.variant !== "occupied") this.drawSleeperHead(v.extras, lying, -sw * 0.3, -art.tex.height * k * 0.55);
-      else if (lying) this.drawSleeperHead(v.extras, lying, -sw * 0.3, -art.tex.height * k * 0.62);
+      if (lying && art.variant !== "occupied") this.drawSleeperHead(v.extras, lying, -sw * 0.3 * mirror, -art.tex.height * k * 0.55);
+      else if (lying) this.drawSleeperHead(v.extras, lying, -sw * 0.3 * mirror, -art.tex.height * k * 0.62);
     } else {
       const sleeper = lying ? { hair: hex(lying.d.appearance.hair), skin: hex(lying.d.appearance.skin) } : undefined;
       drawStandee(v.g, f.def, def.color, sw, sh, { on: !!f.state?.on, sleeper, foods: foodTex.some(Boolean) ? [] : foods });

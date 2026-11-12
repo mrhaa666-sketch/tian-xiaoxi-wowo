@@ -1,5 +1,5 @@
 // 本地模拟大脑：没有填 API Key、AI 被限流或出错时，用简单规则让角色继续生活。
-import type { Emotion, PlanStep } from "../core/types";
+import type { Emotion, Pace, PlanStep } from "../core/types";
 import { pickOption, scoreOptions } from "../sim/autonomy";
 import type { Character } from "../sim/character";
 import type { Game, GameEvent } from "../sim/game";
@@ -8,6 +8,7 @@ export interface Decision {
   thought: string;
   emotion: Emotion;
   plan: PlanStep[];
+  pace?: Pace;
   memory?: string;
   relation_changes?: { target: string; delta: number; note: string }[];
   conflict?: { with: string; reason: string };
@@ -32,6 +33,12 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
       return { thought: `${other.name}在跟我说话。`, emotion, plan };
     }
   }
+  const told = events.find((e) => /^主人对.*说：「/.test(e.text));
+  if (told) {
+    const text = told.text.replace(/^.*?「/, "").replace(/」.*$/, "");
+    const r = mockChat(c, text);
+    return { thought: "主人在跟我说话。", emotion: r.emotion, plan: [{ do: "tell_player", line: r.reply.replace(/（现在是本地模拟模式.*?）/, "") }, ...r.plan] };
+  }
   const fed = events.find((e) => e.text.includes("主人给你准备了"));
   if (fed) {
     plan.push({ do: "eat", minutes: 10 }, { do: "tell_player", line: "谢谢，很好吃。" });
@@ -51,11 +58,16 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
   else if (c.d.stress > 70) emotion = "sad";
   if (!choice) return { thought: "发会儿呆吧。", emotion, plan: [{ do: "idle", minutes: 2 }] };
   const step = { ...choice.step };
+  // 快慢：累了、生病、心情差就慢；很急（快憋不住、饿坏了）就快；外向的人平时也走得快一点
+  const n2 = c.d.needs;
+  const pace: Pace = c.d.illness || n2.energy < 30 || n2.mood < 30 ? "slow"
+    : n2.bladder < 15 || n2.hunger < 15 ? "fast"
+    : Math.random() < 0.35 + (50 - c.d.traits.extraversion) / 200 ? "slow" : "normal";
   if (step.do === "talk") {
     const other = game.byId(step.target ?? "");
     const lines = ["你在干嘛呀？", "今天过得怎么样？", "要不要一起吃点东西？", "好无聊啊。", ...c.d.lore.catchphrases];
     step.line = pick(lines);
-    return { thought: `想找${other?.name ?? "人"}说说话。`, emotion, plan: [step] };
+    return { thought: `想找${other?.name ?? "人"}说说话。`, emotion, plan: [step], pace };
   }
   const thoughts: Record<string, string[]> = {
     肚子饿: ["肚子饿了。", "先吃点东西吧。"], 困了: ["好困……", "该睡了。"], 想上厕所: ["要去一下厕所。"], 想洗干净: ["身上黏黏的，去洗洗。"],
@@ -65,7 +77,7 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
   const thought = pick(thoughts[choice.why] ?? ["做点什么好呢。", "随便打发一下时间吧。"]);
   const plan2: PlanStep[] = [step];
   if (choice.why === "想把事情做完") plan2.push({ do: "say", line: pick(["咳……再做一点就好。", ...c.d.lore.catchphrases]) });
-  return { thought, emotion, plan: plan2 };
+  return { thought, emotion, plan: plan2, pace };
 }
 
 export function mockChat(c: Character, text: string): { reply: string; emotion: Emotion; plan: PlanStep[] } {

@@ -1,13 +1,14 @@
 // 角色的运行时：需求变化、生病、执行计划（走路、用家具、说话）。
 // AI 只决定「接下来做什么」，具体怎么走、怎么用家具由这里负责。
-import { SKILL_CN, type CharacterData, type Emotion, type FurnitureInst, type Needs, type PlanStep, type Pose, type Skills } from "../core/types";
+import { SKILL_CN, type CharacterData, type Emotion, type FurnitureInst, type Needs, type Pace, type PlanStep, type Pose, type Skills } from "../core/types";
 import { dateKey } from "../core/time";
 import { emptyDay } from "./defaults";
 import { senseRoom, type RoomSense } from "./perception";
 import { FOOD_BY_ID, FURNITURE_BY_ID, type InteractionDef } from "../world/catalog";
 import type { Game } from "./game";
 
-const SPEED = 2.4; // 格/秒
+const SPEED = 1.3; // 格/秒（平常速度）
+const PACE_SPEED = { slow: 0.7, normal: 1, fast: 1.45 } as const;
 
 interface Running {
   step: PlanStep;
@@ -27,6 +28,8 @@ export class Character {
   queue: PlanStep[] = [];
   run: Running | null = null;
   pose: Pose = "stand";
+  /** 动作快慢，由 AI（或本地规则）每次做决定时给出 */
+  pace: Pace = "normal";
   moving = false;
   hidden = false; // 躺在床上、泡在浴缸里时，角色本身不画，由家具立牌画出「有人」
   back = false; // 朝向屏幕里面（往上走）
@@ -380,7 +383,7 @@ export class Character {
     const tx = next.x + 0.5, ty = next.y + 0.5;
     const dx = tx - this.d.pos.x, dy = ty - this.d.pos.y;
     const dist = Math.hypot(dx, dy);
-    const stepLen = SPEED * dt * (this.d.illness ? 0.7 : 1);
+    const stepLen = SPEED * PACE_SPEED[this.pace] * dt * (this.d.illness ? 0.7 : 1);
     this.moving = true;
     this.pose = "walk";
     // 镜头正对房间：x 是屏幕左右，y 往上走就是背对镜头

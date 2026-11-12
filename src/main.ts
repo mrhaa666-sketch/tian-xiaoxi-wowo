@@ -4,9 +4,11 @@ import { getNews } from "./ai/news";
 import { Game } from "./sim/game";
 import { Scene, type Ghost } from "./render/scene";
 import { UI } from "./ui/app";
+import { initSpriteStore } from "./render/spriteStore";
 import { ROOM_PRESETS, autoWalls, stampPreset } from "./world/presets";
 
 async function boot() {
+  await initSpriteStore();
   const game = Game.load();
   game.newsProvider = getNews;
   const brain = new Brain(game);
@@ -127,7 +129,7 @@ async function boot() {
     } else if (b.tool === "room") {
       const p = ROOM_PRESETS.find((r) => r.id === b.room)!;
       gh = { kind: "rect", x: tx, y: ty, w: p.w, h: p.h, ok: true };
-    } else if (b.tool === "turn") {
+    } else if (b.tool === "turn" || b.tool === "mirror") {
       const f = w.furnitureAt(tx, ty);
       if (f) gh = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: true };
     } else if (b.tool === "erase") {
@@ -154,6 +156,9 @@ async function boot() {
     } else if (b.tool === "turn") {
       const f = w.furnitureAt(tx, ty);
       if (f) f.back = !f.back;
+    } else if (b.tool === "mirror") {
+      const f = w.furnitureAt(tx, ty);
+      if (f) f.flip = !f.flip;
     } else if (b.tool === "room") {
       const p = ROOM_PRESETS.find((r) => r.id === b.room)!;
       const name = stampPreset(w, p, tx, ty);

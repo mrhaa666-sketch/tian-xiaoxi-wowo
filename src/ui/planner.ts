@@ -300,6 +300,39 @@ export class Planner {
     this.draw();
   }
 
+  /** 新加一个房间：自动找房子旁边的空位贴上去（尽量不让房子变得太散），选中后可以再拖动 */
+  private addRoom(kindId: string) {
+    const k = KIND_BY_ID[kindId];
+    const rs = this.plan.rooms;
+    const size = { w: k.w, h: k.h };
+    let pos = { x: 0, y: 0 };
+    if (rs.length) {
+      const bx0 = Math.min(...rs.map((r) => r.x)), by0 = Math.min(...rs.map((r) => r.y));
+      const bx1 = Math.max(...rs.map((r) => r.x + r.w)), by1 = Math.max(...rs.map((r) => r.y + r.h));
+      let best: { x: number; y: number; score: number } | null = null;
+      for (let y = by0 - size.h; y <= by1; y++) for (let x = bx0 - size.w; x <= bx1; x++) {
+        const cand = { id: "", kind: k.id, name: "", x, y, ...size };
+        if (rs.some((o) => overlaps(o, cand))) continue;
+        const touch = rs.reduce((n, o) => n + sharedEdges(cand, o).length, 0);
+        if (!touch) continue;
+        // 房子外框变大越少越好；贴着的墙越长越好；室外房间放在下面
+        const nx0 = Math.min(bx0, x), ny0 = Math.min(by0, y), nx1 = Math.max(bx1, x + size.w), ny1 = Math.max(by1, y + size.h);
+        const grow = (nx1 - nx0) * (ny1 - ny0) - (bx1 - bx0) * (by1 - by0);
+        const score = grow * 1.0 - touch * 2 + (k.outdoor ? -y * 0.5 : 0);
+        if (!best || score < best.score) best = { x, y, score };
+      }
+      if (!best) { this.flash("找不到能放的位置"); return; }
+      pos = best;
+    }
+    const room: PlanRoom = { id: planId(), kind: k.id, name: uniqueName(this.plan, k.name), x: pos.x, y: pos.y, ...size };
+    this.plan.rooms.push(room);
+    this.sel = room.id;
+    this.mode = { t: "select" };
+    this.changed();
+    this.fit();
+    this.flash(`加了一间${room.name}，可以拖动换位置、拖右下角改大小`);
+  }
+
   private changed() {
     ensureDoors(this.plan);
     this.renderPanel();
@@ -319,7 +352,7 @@ export class Planner {
     const m = this.mode;
     const hint = m.t === "place" ? `在格子上点一下放下${KIND_BY_ID[m.kind].name}，或者拖出一个范围。`
       : m.t === "door" ? "点房间之间的墙加门，再点一次去掉。如果去掉后有房间走不到，会自动补一扇门。"
-      : s ? "拖动房间挪位置，拖右下角的圆点改大小。" : "点下面的房间类型开始拼，点已有的房间可以修改。";
+      : s ? "拖动房间挪位置，拖右下角的圆点改大小。" : "点下面的房间类型，就会在房子旁边加一间新房间；点已有的房间可以修改。";
     const selPanel = s ? `<div class="pl-sel">
         <input id="pl-name" value="${esc(s.name)}" maxlength="10" aria-label="房间名" />
         <select id="pl-kind" aria-label="房间类型">${ROOM_KINDS.map((k) => `<option value="${k.id}" ${k.id === s.kind ? "selected" : ""}>${k.name}</option>`).join("")}</select>
@@ -334,7 +367,7 @@ export class Planner {
       <p class="hint">${hint}</p>`;
     panel.querySelector<HTMLElement>("#pl-select")!.onclick = () => { this.mode = { t: "select" }; this.renderPanel(); };
     panel.querySelector<HTMLElement>("#pl-door")!.onclick = () => { this.mode = { t: "door" }; this.sel = null; this.renderPanel(); this.draw(); };
-    panel.querySelectorAll<HTMLElement>("[data-kind]").forEach((b) => (b.onclick = () => { this.mode = { t: "place", kind: b.dataset.kind! }; this.sel = null; this.renderPanel(); this.draw(); }));
+    panel.querySelectorAll<HTMLElement>("[data-kind]").forEach((b) => (b.onclick = () => this.addRoom(b.dataset.kind!)));
     if (s) {
       const name = panel.querySelector<HTMLInputElement>("#pl-name")!;
       name.onchange = () => { s.name = uniqueName(this.plan, name.value.trim() || KIND_BY_ID[s.kind].name, s.id); name.value = s.name; this.draw(); };

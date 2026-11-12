@@ -1,6 +1,7 @@
 // 角色的画法。现在是代码画的占位 Q 版小人；
 // 以后接入「零件 + 骨骼」的角色包时，实现同样的 CharSkin 接口替换掉 ProceduralSkin 即可。
-import { Assets, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { spriteUrl } from "./spriteStore";
 import type { Character } from "../sim/character";
 import { hex, shade } from "./iso";
 
@@ -140,7 +141,7 @@ const manifests = new Map<string, Promise<SpriteManifest | null>>();
 export function loadManifest(id: string): Promise<SpriteManifest | null> {
   let p = manifests.get(id);
   if (!p) {
-    p = fetch(`packs/chars/${id}/manifest.json`)
+    p = fetch(spriteUrl(id, "manifest.json"))
       .then((r) => (r.ok && (r.headers.get("content-type") ?? "").includes("json") ? r.json() : null))
       .catch(() => null);
     manifests.set(id, p);
@@ -185,7 +186,11 @@ export class SpriteSkin implements CharSkin {
     if (this.loading.has(key)) return null;
     this.loading.add(key);
     try {
-      const t = await Assets.load<Texture>(`packs/chars/${this.spritesId}/${key}.png`);
+      // 立绘可能是存在浏览器里的 blob 地址（没有扩展名），所以自己加载图片再做成贴图
+      const img = new Image();
+      img.src = spriteUrl(this.spritesId, `${key}.png`);
+      await img.decode();
+      const t = Texture.from(img);
       this.textures.set(key, t);
       return t;
     } catch { return null; } finally { this.loading.delete(key); }

@@ -235,6 +235,19 @@ export class Game {
 
   // ———————————————————— 主人 ————————————————————
 
+  /** 主人同时对几个角色说话（群发）。每个人都会收到，并按自己的性格回应 */
+  messageGroup(targets: Character[], text: string) {
+    const all = targets.length === this.chars.length && targets.length > 1;
+    const who = all ? "大家" : targets.map((c) => c.name).join("、");
+    this.log("player", `对${who}说：${text}`);
+    for (const c of targets) {
+      c.d.chat.push({ t: Date.now(), from: "player", text: targets.length > 1 ? `（对${all ? "大家" : who}）${text}` : text });
+      const to = targets.length > 1 ? `主人对${all ? "家里所有人" : who}说` : "主人对你说";
+      this.emit(c, `${to}：「${text}」${targets.length > 1 ? "（这句话不是只对你一个人说的）" : ""}`, 3);
+    }
+    this.changed();
+  }
+
   tellPlayer(c: Character, line: string) {
     c.say(line);
     c.d.chat.push({ t: Date.now(), from: "char", text: line });

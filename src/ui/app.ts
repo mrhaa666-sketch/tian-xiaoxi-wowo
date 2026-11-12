@@ -13,6 +13,7 @@ import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
 import { scoreOptions } from "../sim/autonomy";
 import { exportPack, importPack } from "../sim/pack";
+import { spriteUrl } from "../render/spriteStore";
 import { DEEPSEEK_BASE } from "../ai/provider";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -42,7 +43,7 @@ const ICONS: Record<string, string> = {
 };
 const icon = (name: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
-export type BuildTool = "floor" | "wall" | "door" | "window" | "furniture" | "turn" | "room" | "erase";
+export type BuildTool = "floor" | "wall" | "door" | "window" | "furniture" | "turn" | "mirror" | "room" | "erase";
 
 export interface BuildState {
   on: boolean;
@@ -228,8 +229,8 @@ export class UI {
     if (d.sprites) {
       // 立绘头像：按当前心情换表情，图片加载失败就退回色块头像
       const emo = d.illness ? "sick" : d.emotion;
-      const src = `packs/chars/${d.sprites}/avatar_${emo}.png`;
-      return `<span class="avatar img" style="--s:${size}px;--ring:${ring};background:${a.skin}"><img alt="" src="${src}" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='packs/chars/${d.sprites}/avatar_normal.png'}else{this.remove()}"></span>`;
+      const src = spriteUrl(d.sprites, `avatar_${emo}.png`);
+      return `<span class="avatar img" style="--s:${size}px;--ring:${ring};background:${a.skin}"><img alt="" src="${src}" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='${spriteUrl(d.sprites, "avatar_normal.png")}'}else{this.remove()}"></span>`;
     }
     return `<span class="avatar" style="--s:${size}px;--ring:${ring};background:${a.skin}"><i style="background:${a.hair}"></i></span>`;
   }
@@ -256,11 +257,12 @@ export class UI {
         <div class="p-main"><div class="p-name">${esc(c.name)}${c.d.illness ? " 🤒" : ""}</div><div class="p-act">${esc(c.room)} · ${esc(c.d.activity)}</div><div class="minibars">${bars}</div></div></button>`;
     }).join("");
     const local = this.localPacks.length ? `<h4 class="sec">本地角色包（packs 文件夹）</h4><div class="local-packs">${this.localPacks.map((x, i) => `<button class="btn small" data-local="${i}">＋ ${esc(x.name)}</button>`).join("")}</div>` : "";
-    body.innerHTML = `<div class="sheet-head"><h2>角色</h2><button class="btn primary small" id="p-add">＋ 新角色</button></div><div class="people">${cards}</div>
+    body.innerHTML = `<div class="sheet-head"><h2>角色</h2><div class="head-btns"><button class="btn small" id="p-msg">发消息</button><button class="btn primary small" id="p-add">＋ 新角色</button></div></div><div class="people">${cards}</div>
       <div class="pack-row"><button class="btn small" id="p-import">导入角色包</button><button class="btn small" id="p-export">导出全部角色</button>
 </div>${local}`;
     body.querySelectorAll<HTMLElement>(".person").forEach((el) => (el.onclick = () => this.select(el.dataset.id!)));
     body.querySelector<HTMLElement>("#p-add")!.onclick = () => this.openEditor(null);
+    body.querySelector<HTMLElement>("#p-msg")!.onclick = () => this.openMessage();
     body.querySelector<HTMLElement>("#p-import")!.onclick = () => this.packFile().click();
     body.querySelector<HTMLElement>("#p-export")!.onclick = () => this.downloadPack(this.game.chars.map((c) => c.d), "全部角色");
     body.querySelectorAll<HTMLElement>("[data-local]").forEach((b) => (b.onclick = async () => {
@@ -301,8 +303,8 @@ export class UI {
     } catch { /* 没有本地角色包就算了 */ }
   }
 
-  private applyPack(raw: unknown) {
-    const { added, problems } = importPack(this.game, raw);
+  private async applyPack(raw: unknown) {
+    const { added, problems } = await importPack(this.game, raw);
     if (added.length) {
       this.game.log("player", `${added.join("、")}搬进来了`);
       this.renderRoster();
@@ -313,8 +315,9 @@ export class UI {
     else this.flash(msg);
   }
 
-  private downloadPack(chars: CharacterData[], label: string) {
-    const blob = new Blob([JSON.stringify(exportPack(this.game, chars), null, 2)], { type: "application/json" });
+  private async downloadPack(chars: CharacterData[], label: string) {
+    this.flash("正在打包角色（带立绘的会大一些）…");
+    const blob = new Blob([JSON.stringify(await exportPack(this.game, chars), null, 1)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `角色包-${label}.json`;
@@ -467,6 +470,49 @@ export class UI {
 
   // ———————————————————— 聊天（全屏页面） ————————————————————
 
+  /** 发消息：可以发给全体、选几个人，或者只发给一个人（只选一个人时直接进聊天） */
+  openMessage(preselect?: string[]) {
+    const chars = this.game.chars;
+    const picked = new Set(preselect ?? chars.map((c) => c.id));
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>发消息</h2></header>
+      <div class="page-body">
+        <div class="field"><label>发给谁</label>
+          <div class="msg-to">
+            <button type="button" class="chip-btn" id="m-all">全部</button>
+            ${chars.map((c) => `<button type="button" class="msg-who" data-id="${c.id}" aria-pressed="false">${this.avatar(c.d, 40)}<span>${esc(c.name)}</span></button>`).join("")}
+          </div>
+          <div class="help" id="m-help"></div></div>
+        <div class="field"><label for="m-text">说什么</label><textarea id="m-text" style="min-height:90px" placeholder="例如：今天晚上一起吃火锅吧！"></textarea></div>
+        <button class="btn primary block" id="m-send">发送</button>
+      </div>`);
+    const $ = <T extends HTMLElement>(s: string) => p.querySelector<T>(s)!;
+    const sync = () => {
+      p.querySelectorAll<HTMLElement>(".msg-who").forEach((b) => { const on = picked.has(b.dataset.id!); b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+      $("#m-all").classList.toggle("on", picked.size === chars.length);
+      $("#m-help").textContent = picked.size === 0 ? "至少选一个人" : picked.size === 1 ? "只选了一个人：会直接打开和 TA 的聊天" : picked.size === chars.length ? "发给家里所有人，每个人都会按自己的性格回应" : `发给选中的 ${picked.size} 个人`;
+      $<HTMLButtonElement>("#m-send").disabled = picked.size === 0;
+    };
+    p.querySelectorAll<HTMLElement>(".msg-who").forEach((b) => (b.onclick = () => { const id = b.dataset.id!; if (picked.has(id)) picked.delete(id); else picked.add(id); sync(); }));
+    $("#m-all").onclick = () => { if (picked.size === chars.length) picked.clear(); else chars.forEach((c) => picked.add(c.id)); sync(); };
+    $("#m-send").onclick = () => {
+      const text = $<HTMLTextAreaElement>("#m-text").value.trim();
+      if (!text) { $<HTMLTextAreaElement>("#m-text").focus(); return; }
+      const targets = chars.filter((c) => picked.has(c.id));
+      if (!targets.length) return;
+      p.close();
+      if (targets.length === 1) {
+        this.openChat(targets[0].id);
+        const input = this.els["page-host"].querySelector<HTMLInputElement>("#chatinput");
+        if (input) { input.value = text; input.form?.requestSubmit(); }
+        return;
+      }
+      this.game.messageGroup(targets, text);
+      this.flash(`已发给${targets.length === chars.length ? "所有人" : targets.map((c) => c.name).join("、")}，回复会出现在各自的聊天里`);
+    };
+    sync();
+  }
+
   openChat(id: string) {
     const c = this.game.byId(id);
     if (!c) return;
@@ -550,7 +596,7 @@ export class UI {
     if (this.sheet !== "build") return;
     const body = this.els["sheet-body"];
     const b = this.build;
-    const tools: [BuildTool, string][] = [["furniture", "家具"], ["turn", "翻面"], ["room", "房间"], ["floor", "地板"], ["wall", "墙"], ["door", "门"], ["window", "窗"], ["erase", "拆除"]];
+    const tools: [BuildTool, string][] = [["furniture", "家具"], ["turn", "翻面"], ["mirror", "镜像"], ["room", "房间"], ["floor", "地板"], ["wall", "墙"], ["door", "门"], ["window", "窗"], ["erase", "拆除"]];
     let opts = "";
     let hint = "";
     if (b.tool === "furniture") {
@@ -563,6 +609,8 @@ export class UI {
         : "点地板放下家具。";
     } else if (b.tool === "turn") {
       hint = "点一件家具，让它转过身背对镜头（再点一次转回来）。";
+    } else if (b.tool === "mirror") {
+      hint = "点一件家具，让它左右镜像翻过来，比如床头换到另一边（再点一次换回来）。";
     } else if (b.tool === "floor") {
       opts = `<div class="items">${FLOORS.map((f) => `<button class="item ${b.floor === f.id ? "on" : ""}" data-floor="${f.id}"><span class="thumb sq" style="--c:${hexColor(f.color)}"><img alt="" src="${asset("floors", f.texture)}" onerror="this.remove()"></span><span>${f.name}</span></button>`).join("")}</div>
         <div class="field-row"><label>房间名<input id="room-name" value="${esc(b.roomName)}" /></label><label class="check"><input type="checkbox" id="auto-walls" ${b.autoWalls ? "checked" : ""}/> 自动围墙</label></div>`;

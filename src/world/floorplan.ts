@@ -257,6 +257,14 @@ export function planFromWorld(world: World): Plan {
 
 /** 按户型重新生成房子：清空原来的地板、墙和家具，每个房间按类型摆上默认家具 */
 export function applyPlan(world: World, plan: Plan) {
+  // 新房间可能加在原来房子的左边或上面（坐标是负数），先整体挪回从 0 开始
+  if (plan.rooms.length) {
+    const dx = -Math.min(...plan.rooms.map((r) => r.x)), dy = -Math.min(...plan.rooms.map((r) => r.y));
+    if (dx || dy) {
+      for (const r of plan.rooms) { r.x += dx; r.y += dy; }
+      plan.doors = plan.doors.map((k) => { const [x, y, d] = k.split(","); return `${Number(x) + dx},${Number(y) + dy},${d}`; });
+    }
+  }
   ensureDoors(plan);
   world.data.tiles = {};
   world.data.walls = {};
