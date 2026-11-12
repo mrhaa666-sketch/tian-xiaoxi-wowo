@@ -120,6 +120,7 @@ export function buildStarterHouse(world: World) {
     { def: "bookshelf", x: 0, y: 0 }, { def: "tv", x: 2, y: 0 }, { def: "plant_big", x: 5, y: 0 },
     { def: "rug", x: 2, y: 1 }, { def: "coffee_table", x: 2, y: 2 }, { def: "sofa", x: 2, y: 3, back: true },
     { def: "armchair", x: 4, y: 2 }, { def: "lamp", x: 5, y: 4 }, { def: "low_cabinet", x: 0, y: 4 },
+    { def: "wall_painting", x: 1, y: 0 }, { def: "wall_clock", x: 4, y: 0 },
   ]);
   room(world, "厨房", 6, 0, 4, 3, "tile", "sage", [
     { def: "fridge", x: 0, y: 0 }, { def: "stove", x: 1, y: 0 }, { def: "sink", x: 2, y: 0 }, { def: "kitchen_counter", x: 3, y: 0 },
@@ -147,7 +148,12 @@ export function buildStarterHouse(world: World) {
   const win = (x: number, y: number, d: "N" | "W", style: string) => world.setWall(x, y, d, { kind: "window", style });
   win(3, 0, "N", "cream"); win(0, 2, "W", "cream"); win(8, 0, "N", "sage"); win(10, 3, "N", "sky");
   win(0, 8, "W", "peach");
-  world.addFurniture("plant", 0, 11);
-  world.addFurniture("chair", 10, 9);
+  // 院子
+  world.addFurniture("small_tree", 0, 11);
+  world.addFurniture("flower_bed", 3, 10);
+  world.addFurniture("mailbox", 5, 11);
+  world.addFurniture("bicycle", 7, 11);
+  world.addFurniture("bench", 10, 9);
+  world.addFurniture("patio_table", 11, 11);
   world.rebuildIndex();
 }

@@ -334,10 +334,47 @@ export class Game {
     this.log("system", `你离开了大约 ${(minutes / 60).toFixed(1)} 小时`);
   }
 
+  /**
+   * 节日装饰：圣诞节在客厅摆圣诞树，春节、除夕、元宵节挂红灯笼；节日过了自动收起来。
+   * 装饰品带 state.festival 标记，和玩家自己摆的区分开。
+   */
+  decorateFestivals(festivals: string[]) {
+    const w = this.world;
+    const wanted = new Set<string>();
+    if (festivals.includes("圣诞节")) wanted.add("christmas_tree");
+    if (festivals.some((f) => ["春节", "除夕", "元宵节"].includes(f))) wanted.add("red_lantern");
+    let changed = false;
+    for (const f of [...w.data.furniture]) {
+      if (f.state?.festival && !wanted.has(f.def)) { w.removeFurniture(f.uid); changed = true; }
+    }
+    // 摆在客厅（没有客厅就摆在最大的房间）
+    const counts = new Map<string, number>();
+    for (const t of Object.values(w.data.tiles)) if (t.room) counts.set(t.room, (counts.get(t.room) ?? 0) + 1);
+    const room = counts.has("客厅") ? "客厅" : [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!room) return;
+    const tiles = Object.entries(w.data.tiles).filter(([, t]) => t.room === room).map(([k]) => k.split(",").map(Number) as [number, number]).sort((a, b) => a[1] - b[1] || b[0] - a[0]);
+    for (const def of wanted) {
+      if (w.data.furniture.some((f) => f.def === def && f.state?.festival)) continue;
+      for (const [x, y] of tiles) {
+        if (def === "red_lantern" && (w.wall(x, y, "N")?.kind !== "wall" || w.tile(x, y - 1))) continue;
+        if (def === "christmas_tree" && w.data.walls[`${x},${y},N`]?.kind === "door") continue;
+        const f = w.addFurniture(def, x, y, 0);
+        if (!f) continue;
+        // 圣诞树不能挡住路
+        if (def === "christmas_tree" && !w.accessSpots(f).length) { w.removeFurniture(f.uid); continue; }
+        f.state = { ...f.state, festival: true };
+        changed = true;
+        break;
+      }
+    }
+    if (changed) this.changed();
+  }
+
   private checkClock(initial = false) {
     const now = new Date();
     const today = dateKey(now);
     this.todayFestivals = festivalsOf(now);
+    this.decorateFestivals(this.todayFestivals);
     for (const f of this.todayFestivals) {
       if (this.firedFestivals[f] === today) continue;
       this.firedFestivals[f] = today;

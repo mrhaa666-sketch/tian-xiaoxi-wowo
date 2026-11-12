@@ -49,7 +49,7 @@ export class World {
   furnitureAt(x: number, y: number): FurnitureInst | undefined {
     const id = this.blocked.get(key(x, y));
     if (id) return this.getFurniture(id);
-    // 可行走家具（地毯）
+    // 可行走家具（地毯）和墙饰
     return this.data.furniture.find((f) => {
       const { w, h } = footprint(f);
       return x >= f.x && x < f.x + w && y >= f.y && y < f.y + h;
@@ -143,9 +143,14 @@ export class World {
       for (let dy = 0; dy < h; dy++) {
         const tx = x + dx, ty = y + dy;
         if (!this.tile(tx, ty)) return false;
-        const other = this.furnitureAt(tx, ty);
-        if (other && other.uid !== ignoreUid) {
+        for (const other of this.data.furniture) {
+          if (other.uid === ignoreUid) continue;
+          const fp = footprint(other);
+          if (tx < other.x || tx >= other.x + fp.w || ty < other.y || ty >= other.y + fp.h) continue;
           const od = FURNITURE_BY_ID[other.def];
+          // 挂在墙上的装饰和地上的家具互不影响，但两件墙饰不能挂在同一格
+          if (!!od.wallMounted !== !!def.wallMounted) continue;
+          if (od.wallMounted && def.wallMounted) return false;
           // 地毯上可以放家具，家具上不能放地毯以外的东西
           if (!(od.walkable && !def.walkable)) return false;
         }

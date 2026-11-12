@@ -26,6 +26,9 @@ function standeeWidth(def: string, w: number, h: number) {
     bar_stool: 48, round_table: 100, microwave_cabinet: 88, washbasin: 84, washing_machine: 88, laundry_basket: 78, towel_rack: 62,
     office_chair: 62, gaming_chair: 66, easel: 80, guitar_stand: 50, electric_guitar_stand: 50, speaker: 62, mic_stand: 40,
     music_stand: 58, headphone_desk: 84, game_tv: 104, arcade_machine: 80, bookshelf_low: 190, keyboard_stand: 190,
+    bench: 180, patio_table: 100, flower_bed: 180, small_tree: 112, bicycle: 170, mailbox: 54, cat_tower: 88, fish_tank: 96,
+    christmas_tree: 104, shoe_cabinet: 168, coat_rack: 62, umbrella_stand: 48,
+    wall_clock: 58, wall_painting: 104, wall_poster: 66, wall_shelf: 108, curtain: 112, red_lantern: 92,
   };
   if (thin[def]) return thin[def];
   return 96 + (w - 1) * 118;
@@ -380,7 +383,7 @@ export class Scene {
     const foods = foodItems.map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
     const art = this.furnitureTexture(f, !!lying);
     const foodTex = foodItems.map((x) => getTexture("food", `food_${x.kind}`));
-    const stateKey = [f.x, f.y, f.rot, f.back ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
+    const stateKey = [this.game.settings.wallMode, f.x, f.y, f.rot, f.back ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
     let v = this.furnitureViews.get(f.uid);
     if (v && v.stateKey === stateKey) return;
     if (!v) {
@@ -425,10 +428,14 @@ export class Scene {
     const sw = standeeWidth(f.def, w, h);
     const sh = STANDEE_H[f.def] ?? def.height;
     if (def.wallMounted) {
-      // 挂在后墙上：贴在这一格的北墙上，离地一段距离
+      // 墙是矮墙沿时（「矮墙」模式下的室内墙）没有地方挂，先不显示
+      const tall = !this.game.world.tile(f.x, f.y - 1) || this.game.settings.wallMode === "full";
+      v.box.visible = tall && this.game.world.wall(f.x, f.y, "N")?.kind === "wall";
+      // 挂在后墙上：贴在这一格的北墙上，图片的中心对准墙面中间偏上的高度
       const c = toScreen(f.x + w / 2, f.y);
-      v.box.position.set(c.x, c.y - 70);
-      v.box.zIndex = f.y * 10 - 4;
+      const hpx = art ? (art.tex.height * sw) / art.tex.width : sh;
+      v.box.position.set(c.x, c.y - WALL_H * 0.6 + hpx / 2);
+      v.box.zIndex = f.y * 10 - 3;
     } else {
       const c = toScreen(f.x + w / 2, f.y + h - 0.15);
       v.box.position.set(c.x, c.y);

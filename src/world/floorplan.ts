@@ -25,13 +25,14 @@ export const ROOM_KINDS: RoomKind[] = [
       { def: "bookshelf", at: "top-left" }, { def: "tv", at: "top-center" }, { def: "plant_big", at: "top-right" },
       { def: "rug", at: "center" }, { def: "coffee_table", at: "center" }, { def: "sofa", at: "below-center", back: true },
       { def: "armchair", at: "right" }, { def: "lamp", at: "corner-bl" }, { def: "low_cabinet", at: "corner-br" },
+      { def: "wall_painting", at: "top-left" }, { def: "wall_clock", at: "top-right" },
     ],
   },
   {
     id: "bedroom", name: "卧室", w: 4, h: 4, minW: 2, minH: 2, floor: "carpet", wall: "peach", color: "#f8cfd9", window: true,
     furnish: [
       { def: "wardrobe", at: "top-left" }, { def: "bed", at: "top-right", rot: 1 }, { def: "nightstand", at: "top" },
-      { def: "dresser", at: "corner-bl" }, { def: "plant_small", at: "corner-br" },
+      { def: "dresser", at: "corner-bl" }, { def: "plant_small", at: "corner-br" }, { def: "wall_clock", at: "top-center" },
     ],
   },
   {
@@ -39,6 +40,7 @@ export const ROOM_KINDS: RoomKind[] = [
     furnish: [
       { def: "wardrobe", at: "top-left" }, { def: "bed_double", at: "top-center" }, { def: "lamp_desk", at: "top-right" },
       { def: "floor_cushion", at: "below-center" }, { def: "beanbag", at: "corner-bl" }, { def: "mirror_stand", at: "corner-br" },
+      { def: "wall_shelf", at: "top-center" }, { def: "curtain", at: "top-left" },
     ],
   },
   {
@@ -52,7 +54,7 @@ export const ROOM_KINDS: RoomKind[] = [
     id: "dining", name: "餐厅", w: 4, h: 4, minW: 3, minH: 3, floor: "wood_dark", wall: "cream", color: "#e8c9a8", window: true,
     furnish: [
       { def: "cupboard", at: "top-left" }, { def: "plant_big", at: "top-right" }, { def: "table", at: "center" },
-      { def: "chair", at: "left" }, { def: "chair", at: "right" }, { def: "round_table", at: "corner-br" },
+      { def: "chair", at: "left" }, { def: "chair", at: "right" }, { def: "round_table", at: "corner-br" }, { def: "wall_painting", at: "top-center" },
     ],
   },
   {
@@ -65,18 +67,18 @@ export const ROOM_KINDS: RoomKind[] = [
   },
   {
     id: "study", name: "书房", w: 3, h: 4, minW: 2, minH: 2, floor: "mint", wall: "lilac", color: "#cdeadf", window: true,
-    furnish: [{ def: "desk", at: "top-right" }, { def: "bookshelf", at: "top-left" }, { def: "office_chair", at: "center" }, { def: "easel", at: "corner-br" }, { def: "plant", at: "corner-bl" }],
+    furnish: [{ def: "desk", at: "top-right" }, { def: "bookshelf", at: "top-left" }, { def: "office_chair", at: "center" }, { def: "easel", at: "corner-br" }, { def: "plant", at: "corner-bl" }, { def: "wall_shelf", at: "top-left" }],
   },
   {
     id: "music", name: "音乐室", w: 4, h: 4, minW: 3, minH: 3, floor: "wood", wall: "night", color: "#c9cdef", window: true,
     furnish: [
       { def: "upright_piano", at: "top-left" }, { def: "keyboard_stand", at: "top-right" }, { def: "mic_stand", at: "center" },
-      { def: "guitar_stand", at: "corner-br" }, { def: "electric_guitar_stand", at: "right" }, { def: "speaker", at: "corner-bl" }, { def: "music_stand", at: "left" },
+      { def: "guitar_stand", at: "corner-br" }, { def: "electric_guitar_stand", at: "right" }, { def: "speaker", at: "corner-bl" }, { def: "music_stand", at: "left" }, { def: "wall_poster", at: "top-center" },
     ],
   },
   {
     id: "game", name: "游戏室", w: 4, h: 3, minW: 3, minH: 2, floor: "carpet_blue", wall: "pink", color: "#c9daf2",
-    furnish: [{ def: "arcade_machine", at: "top-left" }, { def: "game_tv", at: "top-center" }, { def: "gaming_chair", at: "center", back: true }, { def: "beanbag", at: "corner-bl" }, { def: "floor_cushion", at: "corner-br" }],
+    furnish: [{ def: "arcade_machine", at: "top-left" }, { def: "game_tv", at: "top-center" }, { def: "gaming_chair", at: "center", back: true }, { def: "beanbag", at: "corner-bl" }, { def: "floor_cushion", at: "corner-br" }, { def: "wall_poster", at: "top-right" }],
   },
   {
     id: "entry", name: "玄关", w: 2, h: 2, minW: 1, minH: 1, floor: "tile", wall: "cream", color: "#efe6d6",
@@ -85,11 +87,11 @@ export const ROOM_KINDS: RoomKind[] = [
   { id: "hall", name: "走廊", w: 4, h: 1, minW: 1, minH: 1, floor: "wood", wall: "cream", color: "#efe2cc", furnish: [] },
   {
     id: "balcony", name: "阳台", w: 3, h: 2, minW: 1, minH: 1, floor: "deck", wall: "cream", color: "#e6d2b4", outdoor: true,
-    furnish: [{ def: "plant_big", at: "top-left" }, { def: "patio_table", at: "top-right" }, { def: "flower_bed", at: "corner-bl" }],
+    furnish: [{ def: "plant_big", at: "top-left" }, { def: "patio_table", at: "top-right" }, { def: "flower_bed", at: "corner-bl" }, { def: "bench", at: "corner-br" }],
   },
   {
     id: "yard", name: "院子", w: 4, h: 3, minW: 1, minH: 1, floor: "grass", wall: "cream", color: "#cdeab8", outdoor: true,
-    furnish: [{ def: "small_tree", at: "top-left" }, { def: "flower_bed", at: "top-right" }, { def: "bench", at: "corner-bl" }, { def: "mailbox", at: "corner-br" }],
+    furnish: [{ def: "small_tree", at: "top-left" }, { def: "flower_bed", at: "top-right" }, { def: "bench", at: "corner-bl" }, { def: "mailbox", at: "corner-br" }, { def: "bicycle", at: "center" }],
   },
   { id: "empty", name: "空房间", w: 3, h: 3, minW: 1, minH: 1, floor: "wood", wall: "cream", color: "#ebe6ee", furnish: [] },
 ];
@@ -352,7 +354,7 @@ function furnish(world: World, plan: Plan, r: PlanRoom) {
     if (starts.some(([x, y]) => !reach.has(key(x, y)))) return false;
     return placed.every((id) => {
       const f = world.getFurniture(id);
-      if (!f || FURNITURE_BY_ID[f.def].walkable) return true;
+      if (!f || FURNITURE_BY_ID[f.def].walkable || FURNITURE_BY_ID[f.def].wallMounted) return true;
       return world.accessSpots(f).some((sp) => reach.has(key(sp.x, sp.y)));
     });
   };
@@ -384,10 +386,12 @@ function furnish(world: World, plan: Plan, r: PlanRoom) {
       let blocked = false;
       if (!d.walkable) for (let dx = 0; dx < w && !blocked; dx++) for (let dy = 0; dy < h; dy++) if (reserved.has(key(x + dx, y + dy))) { blocked = true; break; }
       if (blocked) continue;
+      // 墙饰只挂在房间上边朝外的实墙上（室内墙默认显示成矮墙沿，挂不住）
+      if (d.wallMounted && (y !== r.y || world.wall(x, y, "N")?.kind !== "wall" || roomAt(plan, x, y - 1))) continue;
       const f = world.addFurniture(item.def, x, y, rot);
       if (!f) continue;
       placed.push(f.uid);
-      if (d.walkable || allReachable()) {
+      if (d.walkable || d.wallMounted || allReachable()) {
         if (item.back) f.back = true;
         break;
       }

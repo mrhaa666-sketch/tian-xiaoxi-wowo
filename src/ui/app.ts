@@ -423,7 +423,9 @@ export class UI {
       opts = `<div class="chips-row">${cats.map((c) => `<button class="chip-btn ${this.furnCat === c ? "on" : ""}" data-cat="${esc(c)}">${esc(c)}</button>`).join("")}</div>
         <div class="items">${FURNITURE.filter((f) => f.category === this.furnCat).map((f) => `<button class="item ${b.furniture === f.id ? "on" : ""}" data-furn="${f.id}">
           <span class="thumb" style="--c:${hexColor(f.color)}"><img alt="" src="${asset("furniture", f.sprite ?? f.id)}" onerror="this.remove()"></span><span>${esc(f.name)}</span></button>`).join("")}</div>`;
-      hint = "点地板放下家具。";
+      hint = this.furnCat === "墙饰" || this.furnCat === "节日"
+        ? "墙饰点靠墙那一格就会挂到后墙上。室内墙默认是矮墙沿，挂上去看不到，可以挂在房子最外面的高墙上，或者在设置里把墙改成高墙。"
+        : "点地板放下家具。";
     } else if (b.tool === "turn") {
       hint = "点一件家具，让它转过身背对镜头（再点一次转回来）。";
     } else if (b.tool === "floor") {
