@@ -451,7 +451,15 @@ export class Scene {
       v.sprite.texture = art.tex;
       v.sprite.anchor.set(0.5, 1);
       v.sprite.position.set(0, 0);
-      const k = sw / art.tex.width;
+      let k = sw / art.tex.width;
+      // 状态图（开灯、开火等）多了光晕或热气时，按原图对齐：家具本身大小不变，光晕和热气往外延伸
+      if (art.variant !== "base") {
+        const base = getTexture("furniture", def.sprite ?? def.id);
+        if (base) {
+          const baseH = (base.height * sw) / base.width;
+          if (art.tex.height / art.tex.width < base.height / base.width) k = baseH / art.tex.height; // 变宽了：按高度对齐
+        }
+      }
       v.sprite.scale.set(k * mirror, k);
       topY = -art.tex.height * k * 0.62;
       // 有人躺着、但没有专门的「有人」图时，在床上叠一个小脑袋
