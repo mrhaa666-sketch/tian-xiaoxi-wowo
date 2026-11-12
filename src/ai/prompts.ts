@@ -121,7 +121,9 @@ function skillsLine(s: Skills) {
 
 /** 角色包里写好的设定 */
 export function loreLines(d: CharacterData): string[] {
-  const l = d.lore;
+  const l = { ...d.lore };
+  // 去掉句末标点，避免拼接后出现「。；」
+  for (const k of ["speechStyle", "backstory", "goals", "fears", "habits", "conflictStyle", "likesTopics", "dislikesTopics"] as const) l[k] = l[k].trim().replace(/[。；;，,.]+$/, "");
   const out: string[] = [];
   const speak = [l.selfName && `自称「${l.selfName}」`, l.callPlayer && `称呼主人为「${l.callPlayer}」`, l.speechStyle, l.catchphrases.length && `口头禅：${l.catchphrases.map((x) => `「${x}」`).join("")}`].filter(Boolean).join("；");
   if (speak) out.push(`【说话方式】${speak}`);
@@ -199,8 +201,16 @@ export function buildContext(game: Game, c: Character, events: GameEvent[]) {
     }
     lines.push(rows.join("\n"));
   }
+  const away = d.lore.presetRelations.filter((r) => !game.chars.some((o) => o.name === r.name));
+  if (away.length) lines.push(`【设定里认识、但不住在这个家的人】${away.map((r) => `${r.name}（好感 ${r.affinity}${r.note ? "，" + r.note : ""}）`).join("；")}`);
 
-  const furn = game.world.describeFurniture().slice(0, 40);
+  // 家具太多时优先保留：所在房间、最喜欢的房间和家具、正在用的、桌上有饭的、自主打分靠前的
+  const wantIds = new Set(wants.map((o) => o.step.target));
+  const prio = (f: ReturnType<typeof game.world.describeFurniture>[number]) =>
+    (f.room === c.room ? 4 : 0) + (d.lore.favoriteFurniture.includes(f.inst.def) ? 3 : 0) + (f.room === d.lore.favoriteRoom ? 2 : 0) +
+    (wantIds.has(f.uid) ? 5 : 0) + (game.world.foodsOn(f.uid).length ? 5 : 0) + (game.occupantOf(f.uid) === c ? 5 : 0);
+  const furn = game.world.describeFurniture().filter((f) => f.interactions.length).map((f, i) => ({ f, i, p: prio(f) }))
+    .sort((a, b) => b.p - a.p || a.i - b.i).slice(0, 60).sort((a, b) => a.i - b.i).map((x) => x.f);
   const frows = ["【家具（id | 名称 | 房间 | 可以做的事）】"];
   for (const f of furn) {
     const occ = game.occupantOf(f.uid);
