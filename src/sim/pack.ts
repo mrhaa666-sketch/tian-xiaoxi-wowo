@@ -15,6 +15,7 @@ export interface PackCharacter {
   traits?: Partial<Traits>;
   skills?: Partial<Skills>;
   appearance?: Partial<Appearance>;
+  sprites?: string;
 }
 
 export interface CharacterPack {
@@ -34,7 +35,7 @@ export function exportPack(game: Game, chars: CharacterData[]): CharacterPack {
       return {
         name: d.name, persona: d.persona, schedule: d.schedule, profile: d.profile,
         lore: { ...d.lore, presetRelations: rel.length ? rel : d.lore.presetRelations },
-        traits: d.traits, skills: d.skills, appearance: d.appearance,
+        traits: d.traits, skills: d.skills, appearance: d.appearance, ...(d.sprites ? { sprites: d.sprites } : {}),
       };
     }),
   };
@@ -81,6 +82,7 @@ function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
     skills: pickDefined({
       cooking: num(s.cooking, 0, 10), music: num(s.music, 0, 10), art: num(s.art, 0, 10), gaming: num(s.gaming, 0, 10), study: num(s.study, 0, 10), fitness: num(s.fitness, 0, 10),
     }),
+    sprites: typeof e.sprites === "string" && /^[a-z0-9_-]{1,40}$/.test(e.sprites) ? e.sprites : undefined,
     appearance: pickDefined({ skin: color(a.skin), hair: color(a.hair), outfit: color(a.outfit), accent: color(a.accent), eyes: color(a.eyes), hairStyle: num(a.hairStyle, 0, 3) }),
   };
 }
@@ -104,6 +106,7 @@ export function importPack(game: Game, raw: unknown): { added: string[]; problem
     const d = newCharacter({ name, persona: e.persona ?? "", schedule: e.schedule ?? "", appearance: { ...randomAppearance(), ...e.appearance } });
     d.profile = { ...d.profile, ...e.profile };
     d.lore = { ...defaultLore(), ...e.lore };
+    if (e.sprites) d.sprites = e.sprites;
     d.traits = { ...d.traits, ...e.traits };
     d.skills = { ...d.skills, ...e.skills };
     const t = game.world.randomTileIn();

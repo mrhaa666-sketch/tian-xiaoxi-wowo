@@ -194,6 +194,8 @@ export interface CharacterData {
   persona: string;  // 性格 / 人设提示词
   schedule: string; // 玩家写的作息表
   appearance: Appearance;
+  /** 角色立绘文件夹名（public/packs/chars/<sprites>/），没有就用代码画的占位小人 */
+  sprites?: string;
   profile: Profile;
   lore: Lore;
   traits: Traits;

@@ -298,3 +298,5 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .pack-row .btn { flex: 1; }
 .local-packs { display: flex; flex-wrap: wrap; gap: 6px; }
 .confirm-text, .dialog p { white-space: pre-line; }
+.avatar.img { background: #fff6f8 !important; }
+.avatar.img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

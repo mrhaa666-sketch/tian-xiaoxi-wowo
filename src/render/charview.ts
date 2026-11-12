@@ -1,6 +1,6 @@
 // 角色的画法。现在是代码画的占位 Q 版小人；
 // 以后接入「零件 + 骨骼」的角色包时，实现同样的 CharSkin 接口替换掉 ProceduralSkin 即可。
-import { Container, Graphics } from "pixi.js";
+import { Assets, Container, Graphics, Sprite, Texture } from "pixi.js";
 import type { Character } from "../sim/character";
 import { hex, shade } from "./iso";
 
@@ -118,5 +118,102 @@ export class ProceduralSkin implements CharSkin {
 
   private drawClosedEyes(f: Graphics, hy: number) {
     for (const sx of [-10, 10]) f.moveTo(sx - 5, hy + 7).quadraticCurveTo(sx, hy + 10, sx + 5, hy + 7).stroke({ width: 2.2, color: 0x4a3b3b });
+  }
+}
+
+// ———————————————————— 角色立绘（世界计划小人等，由 tools/sd-compose.mjs 合成） ————————————————————
+
+export interface SpriteManifest {
+  id: string;
+  width: number;
+  height: number;
+  footX: number;
+  footY: number;
+  bodies: string[];
+  faces: string[];
+  emotionBody: Record<string, string>;
+  avatar: Record<string, string>;
+}
+
+const manifests = new Map<string, Promise<SpriteManifest | null>>();
+/** 读取 packs/chars/<id>/manifest.json；没有就返回 null */
+export function loadManifest(id: string): Promise<SpriteManifest | null> {
+  let p = manifests.get(id);
+  if (!p) {
+    p = fetch(`packs/chars/${id}/manifest.json`)
+      .then((r) => (r.ok && (r.headers.get("content-type") ?? "").includes("json") ? r.json() : null))
+      .catch(() => null);
+    manifests.set(id, p);
+  }
+  return p;
+}
+
+/** 立绘在场景里的高度（像素），和家具立牌的比例相配 */
+const SPRITE_H = 136;
+
+export class SpriteSkin implements CharSkin {
+  view = new Container();
+  private shadow = new Graphics();
+  private sprite = new Sprite();
+  private fallback = new ProceduralSkin();
+  private m: SpriteManifest | null = null;
+  private textures = new Map<string, Texture>();
+  private loading = new Set<string>();
+  private nextBlink = 0;
+  private current = "";
+
+  constructor(public spritesId: string) {
+    this.shadow.ellipse(0, 0, 26, 10).fill({ color: 0x000000, alpha: 0.18 });
+    this.view.addChild(this.fallback.view);
+    void loadManifest(spritesId).then((m) => {
+      if (!m) return;
+      this.m = m;
+      this.sprite.anchor.set(m.footX / m.width, m.footY / m.height);
+      this.sprite.scale.set(SPRITE_H / m.height);
+      // 先把默认姿势加载好，再从占位小人切过来
+      void this.tex(`${m.emotionBody.normal}__normal`).then(() => {
+        this.view.removeChild(this.fallback.view);
+        this.fallback.view.destroy({ children: true });
+        this.view.addChild(this.shadow, this.sprite);
+      });
+    });
+  }
+
+  private async tex(key: string) {
+    const have = this.textures.get(key);
+    if (have) return have;
+    if (this.loading.has(key)) return null;
+    this.loading.add(key);
+    try {
+      const t = await Assets.load<Texture>(`packs/chars/${this.spritesId}/${key}.png`);
+      this.textures.set(key, t);
+      return t;
+    } catch { return null; } finally { this.loading.delete(key); }
+  }
+
+  update(c: Character, t: number) {
+    const m = this.m;
+    if (!m || !this.textures.size) { this.fallback.update(c, t); return; }
+    const emo = c.d.illness ? "sick" : c.d.emotion;
+    const speaking = !!c.speech;
+    let body = speaking && m.bodies.includes("talk") ? "talk" : m.emotionBody[emo] ?? m.emotionBody.normal;
+    let face = m.faces.includes(`face_${emo}`) ? emo : "normal";
+    // 眨眼：每隔几秒闭眼一下（借用「困」的闭眼表情）
+    const now = performance.now();
+    if (now > this.nextBlink + 140) this.nextBlink = now + 2500 + Math.random() * 3500;
+    if (now > this.nextBlink && ["normal", "sad", "surprised"].includes(face) && m.faces.includes("face_sleepy")) face = "sleepy";
+    if (!m.bodies.includes(body)) body = m.bodies[0];
+    const key = `${body}__${face}`;
+    if (key !== this.current) {
+      const tx = this.textures.get(key);
+      if (tx) { this.sprite.texture = tx; this.current = key; } else void this.tex(key);
+    }
+    // 走路时一上一下；左右翻转（原图朝左）
+    const walking = c.moving;
+    const bob = walking ? Math.abs(Math.sin(t * 10)) * 5 : Math.sin(t * 2.2) * 0.8;
+    this.sprite.y = -bob + (c.pose === "sit" ? 10 : 0);
+    this.sprite.scale.x = Math.abs(this.sprite.scale.x) * (c.d.facing > 0 ? -1 : 1);
+    this.sprite.rotation = walking ? Math.sin(t * 10) * 0.03 : 0;
+    this.shadow.visible = c.pose !== "sit";
   }
 }

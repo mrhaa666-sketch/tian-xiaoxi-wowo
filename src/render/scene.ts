@@ -7,7 +7,7 @@ import type { Game } from "../sim/game";
 import { FLOOR_BY, FOOD_COLORS } from "./palette";
 import { FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
 import { footprint, key } from "../world/world";
-import { ProceduralSkin, type CharSkin } from "./charview";
+import { ProceduralSkin, SpriteSkin, type CharSkin } from "./charview";
 import { drawStandee } from "./standees";
 import { TH, TW, WALL_H, WALL_LOW, hex, shade, toGrid, toScreen } from "./iso";
 
@@ -517,8 +517,15 @@ export class Scene {
     for (const [id, b] of this.bubbles) if (!alive.has(id)) { b.box.destroy({ children: true }); this.bubbles.delete(id); }
     for (const c of this.game.chars) {
       let skin = this.skins.get(c.id);
+      // 换了立绘（或去掉立绘）时重建
+      const want = c.d.sprites ?? "";
+      if (skin && (skin instanceof SpriteSkin ? skin.spritesId : "") !== want) {
+        skin.view.destroy({ children: true });
+        this.skins.delete(c.id);
+        skin = undefined;
+      }
       if (!skin) {
-        skin = new ProceduralSkin();
+        skin = want ? new SpriteSkin(want) : new ProceduralSkin();
         this.skins.set(c.id, skin);
         this.objects.addChild(skin.view);
       }

@@ -96,6 +96,22 @@ function skinMask(img, cx, cy, radius) {
   return out;
 }
 
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+/** 皮肤蒙版的范围（去掉两头 2% 的零星像素） */
+function skinBox(mask) {
+  const xs = [], ys = [];
+  for (let p = 0; p < 512 * 512; p++) if (mask[p]) { xs.push(p % 512); ys.push((p / 512) | 0); }
+  xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+  const q = (arr, t) => arr[Math.min(arr.length - 1, Math.floor(arr.length * t))];
+  const x0 = q(xs, 0.02), x1 = q(xs, 0.98), y0 = q(ys, 0.02), y1 = q(ys, 0.98);
+  return { x0, y0, w: x1 - x0, h: y1 - y0 };
+}
+function alphaCentroid(raw) {
+  let sx = 0, sy = 0, n = 0;
+  for (let p = 0; p < 512 * 512; p++) { const a = raw[p * 4 + 3]; if (a > 20) { sx += (p % 512) * a; sy += ((p / 512) | 0) * a; n += a; } }
+  return n ? { x: sx / n, y: sy / n } : null;
+}
+
 // 身体 → 默认表情、各种心情用哪个身体姿势
 const EMOTION_BODY = { normal: ["talk"], happy: ["joy", "talk"], sad: ["doubt"], angry: ["angry", "doubt"], surprised: ["surprise"], shy: ["doubt"], sick: ["doubt"], sleepy: ["talk"] };
 
@@ -128,7 +144,12 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
   const manifest = { id, name: char, width: outW, height: OUT_H, footX: Math.round(footX), footY: Math.round(footY), bodies, faces, emotionBody: {}, avatar: {} };
   for (const [emo, prefs] of Object.entries(EMOTION_BODY)) manifest.emotionBody[emo] = prefs.find((p) => bodies.includes(p)) ?? bodies[0];
 
-  for (const b of bodies) {
+  // 以默认姿势（说话）为基准，记下五官相对脸部皮肤范围的位置；其他姿势（比如抬头）按皮肤范围的变化把五官挪过去、压扁
+  const ref = manifest.emotionBody.normal;
+  const ratio = {};
+  let refSkin = null;
+  const ordered = [ref, ...bodies.filter((b) => b !== ref)];
+  for (const b of ordered) {
     const bodyFile = path.join(args.bodies, char, b + ".png");
     const body = await rgba(bodyFile);
     const hb = headAt(bFrames[b].anim, bFrames[b].t);
@@ -137,6 +158,8 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
     const fcx = Math.round((hb.x + K * (Math.cos(rad) * vx - Math.sin(rad) * vy) - BB[0]) / bs);
     const fcy = Math.round((hb.y - K * (Math.sin(rad) * vx + Math.cos(rad) * vy) - BB[1]) / bs);
     const mask = skinMask(body, fcx, fcy, 170);
+    const skin = skinBox(mask);
+    if (b === ref) refSkin = skin;
     if (args.debug) { await sharp(mask, { raw: { width: 512, height: 512, channels: 1 } }).png().toFile(path.join(outDir, `_mask_${b}.png`)); console.log(b, "脸中心", fcx, fcy); }
     let headBox = null;
     for (const f of faces) {
@@ -162,7 +185,20 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
       // 先在透明底上摆好，再裁到 512 并乘上皮肤蒙版
       const layerBig = await sharp({ create: { width: 512 + rw * 2, height: 512 + rh * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
         .composite([{ input: scaled, left: left + rw, top: top + rh }]).png().toBuffer();
-      const layer = await sharp(layerBig).extract({ left: rw, top: rh, width: 512, height: 512 }).raw().toBuffer();
+      let layer = await sharp(layerBig).extract({ left: rw, top: rh, width: 512, height: 512 }).raw().toBuffer();
+      const c0 = alphaCentroid(layer);
+      if (b === ref) ratio[f] = { u: (c0.x - skin.x0) / skin.w, v: (c0.y - skin.y0) / skin.h };
+      else if (c0 && ratio[f] && refSkin) {
+        const kx = clamp(skin.w / refSkin.w, 0.85, 1.15), ky = clamp(skin.h / refSkin.h, 0.8, 1.15);
+        const tx = skin.x0 + ratio[f].u * skin.w, ty = skin.y0 + ratio[f].v * skin.h;
+        const W = Math.round(512 * kx), H = Math.round(512 * ky);
+        const res = await sharp(layer, { raw: { width: 512, height: 512, channels: 4 } }).resize(W, H, { fit: "fill" }).png().toBuffer();
+        const ox = Math.round(tx - c0.x * kx), oy = Math.round(ty - c0.y * ky);
+        const padded = await sharp({ create: { width: 512 + W * 2, height: 512 + H * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+          .composite([{ input: res, left: ox + W, top: oy + H }]).png().toBuffer();
+        layer = await sharp(padded).extract({ left: W, top: H, width: 512, height: 512 }).raw().toBuffer();
+        if (args.debug) console.log(b, f, "缩放", kx.toFixed(2), ky.toFixed(2), "偏移", Math.round(tx - c0.x), Math.round(ty - c0.y));
+      }
       for (let p = 0; p < 512 * 512; p++) layer[p * 4 + 3] = Math.round((layer[p * 4 + 3] * mask[p]) / 255);
       const faceLayer = await sharp(layer, { raw: { width: 512, height: 512, channels: 4 } }).png().toBuffer();
       const composed = await sharp(bodyFile).composite([{ input: faceLayer }]).png().toBuffer();
@@ -170,7 +206,14 @@ for (const char of fs.readdirSync(args.faces).filter((n) => fs.statSync(path.joi
       await sharp(composed).extract({ left: x0, top: y0, width: x1 - x0, height: y1 - y0 }).resize(outW, OUT_H).png({ palette: true, quality: 92, effort: 8 }).toFile(path.join(outDir, `${b}__${emo}.png`));
       // 头像：用默认身体，以脸为中心裁正方形
       if (b === manifest.emotionBody.normal) {
-        if (!headBox) { const half = 105; headBox = { left: Math.max(0, fcx - half), top: Math.max(0, fcy - half - 25), size: half * 2 }; }
+        if (!headBox) {
+          // 用皮肤蒙版的实际范围找脸的中心（比预计位置准）
+          let sx = 0, sy = 0, n = 0;
+          for (let p = 0; p < 512 * 512; p++) if (mask[p]) { sx += p % 512; sy += (p / 512) | 0; n++; }
+          const cx = n ? Math.round(sx / n) : fcx, cy = n ? Math.round(sy / n) : fcy;
+          const half = 105;
+          headBox = { left: Math.max(0, cx - half), top: Math.max(0, cy - half - 20), size: half * 2 };
+        }
         await sharp(composed).extract({ left: headBox.left, top: headBox.top, width: Math.min(headBox.size, 512 - headBox.left), height: Math.min(headBox.size, 512 - headBox.top) })
           .resize(AVATAR, AVATAR, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(path.join(outDir, `avatar_${emo}.png`));
         manifest.avatar[emo] = `avatar_${emo}.png`;

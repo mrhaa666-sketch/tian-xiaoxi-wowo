@@ -225,6 +225,12 @@ export class UI {
   private avatar(d: CharacterData, size = 44) {
     const a = d.appearance;
     const ring = d.illness ? "#e86a6a" : d.needs.mood > 60 ? "#5cc58a" : d.needs.mood > 35 ? "#f2c14e" : "#e88a6a";
+    if (d.sprites) {
+      // 立绘头像：按当前心情换表情，图片加载失败就退回色块头像
+      const emo = d.illness ? "sick" : d.emotion;
+      const src = `packs/chars/${d.sprites}/avatar_${emo}.png`;
+      return `<span class="avatar img" style="--s:${size}px;--ring:${ring};background:${a.skin}"><img alt="" src="${src}" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='packs/chars/${d.sprites}/avatar_normal.png'}else{this.remove()}"></span>`;
+    }
     return `<span class="avatar" style="--s:${size}px;--ring:${ring};background:${a.skin}"><i style="background:${a.hair}"></i></span>`;
   }
 
