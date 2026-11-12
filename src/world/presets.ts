@@ -124,8 +124,8 @@ export function buildStarterHouse(world: World) {
   room(world, "浴室", 6, 3, 3, 2, "tile", "sky", [{ def: "bathtub", x: 0, y: 0 }, { def: "medicine", x: 2, y: 0 }, { def: "toilet", x: 0, y: 1 }]);
   room(world, "书房", 9, 3, 3, 4, "mint", "sky", [{ def: "bookshelf", x: 0, y: 0 }, { def: "desk", x: 1, y: 0 }, { def: "chair", x: 1, y: 1 }, { def: "plant", x: 2, y: 3 }]);
   room(world, "走廊", 0, 5, 9, 1, "wood", "cream");
-  room(world, "卧室A", 0, 6, 4, 4, "carpet", "peach", [{ def: "bed", x: 0, y: 0 }, { def: "wardrobe", x: 3, y: 0 }, { def: "lamp", x: 0, y: 2 }, { def: "plant", x: 3, y: 3 }]);
-  room(world, "卧室B", 4, 6, 5, 4, "carpet", "lilac", [{ def: "wardrobe", x: 0, y: 0 }, { def: "bed", x: 4, y: 0 }, { def: "lamp", x: 3, y: 0 }, { def: "rug", x: 1, y: 2 }, { def: "plant", x: 4, y: 3 }]);
+  room(world, "卧室A", 0, 6, 4, 4, "carpet", "peach", [{ def: "bed", x: 2, y: 1, rot: 1 }, { def: "wardrobe", x: 3, y: 0 }, { def: "lamp", x: 0, y: 2 }, { def: "plant", x: 3, y: 3 }]);
+  room(world, "卧室B", 4, 6, 5, 4, "carpet", "lilac", [{ def: "wardrobe", x: 0, y: 0 }, { def: "bed", x: 3, y: 0, rot: 1 }, { def: "lamp", x: 1, y: 0 }, { def: "rug", x: 1, y: 2 }, { def: "plant", x: 4, y: 3 }]);
   for (let x = 0; x < 12; x++) for (let y = 10; y < 12; y++) world.setFloor(x, y, "grass", "院子");
   for (let x = 9; x < 12; x++) for (let y = 7; y < 10; y++) world.setFloor(x, y, "grass", "院子");
   autoWalls(world, 0, 0, 12, 12, "cream");

@@ -8,7 +8,7 @@ import { FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
 import { footprint, key } from "../world/world";
 import { ProceduralSkin, type CharSkin } from "./charview";
 import { drawStandee } from "./standees";
-import { WALL_H, WALL_LOW, hex, shade, toGrid, toScreen } from "./iso";
+import { TH, TW, WALL_H, WALL_LOW, hex, shade, toGrid, toScreen } from "./iso";
 
 /** 立牌高度（像素） */
 const STANDEE_H: Record<string, number> = {
@@ -18,9 +18,9 @@ const STANDEE_H: Record<string, number> = {
 
 /** 立牌宽度：按占地的格数估算 */
 function standeeWidth(def: string, w: number, h: number) {
-  const thin: Record<string, number> = { lamp: 40, plant: 52, chair: 48, toilet: 52, medicine: 56 };
+  const thin: Record<string, number> = { lamp: 44, plant: 60, chair: 54, toilet: 58, medicine: 64 };
   if (thin[def]) return thin[def];
-  return 66 + (Math.max(w, h) - 1) * 74;
+  return 96 + (w - 1) * 118;
 }
 
 const WALL_BY = Object.fromEntries(WALL_STYLES.map((w) => [w.id, w]));
@@ -178,8 +178,9 @@ export class Scene {
       this.floorLayer.addChild(holder);
     }
 
-    // 墙：有厚度。后墙（外面没有地板的那一侧）是高墙，其余在「矮墙」模式下只留一截墙沿
-    const T = 0.08;
+    // 墙。镜头正对房间：东西向的墙（N）正面朝向镜头，南北向的墙（W）只看得到一条竖着的墙顶。
+    // 房子最后面的外墙（后面没有地板）是高墙，其余的墙在「矮墙」模式下只留一截墙沿，方便看清房间里面。
+    const T = 0.1; // 墙厚（格）
     for (const [k, wall] of Object.entries(w.data.walls)) {
       const [xs, ys, d] = k.split(",");
       const x = Number(xs), y = Number(ys);
@@ -187,42 +188,52 @@ export class Scene {
       const behind = dir === "N" ? w.tile(x, y - 1) : w.tile(x - 1, y);
       const front = w.tile(x, y);
       if (!behind && !front) continue;
-      const isBack = !behind && !!front;
+      const exterior = !behind || !front;
+      const isBack = dir === "N" ? !behind : exterior;
       const h = cutaway && !isBack ? WALL_LOW : WALL_H;
       const style = WALL_BY[wall.style] ?? WALL_STYLES[0];
-      // 墙的两条边线：靠后的一条和靠前的一条
-      const off = dir === "N" ? (u: number, t: number) => toScreen(x + u, y + t) : (u: number, t: number) => toScreen(x + t, y + u);
-      const P = (u: number, t: number, v: number) => { const q = off(u, t); return { x: q.x, y: q.y - v }; };
       const g = new Graphics();
       g.label = (front ?? behind)?.room ?? "";
-      const face = dir === "N" ? style.color : shade(style.color, 0.9);
-      const poly = (pts: { x: number; y: number }[], color: number, alpha = 1) => g.poly(pts.flatMap((p) => [p.x, p.y])).fill({ color, alpha });
-      const faceQuad = (u0: number, u1: number, v0: number, v1: number) => [P(u0, T / 2, v0), P(u1, T / 2, v0), P(u1, T / 2, v1), P(u0, T / 2, v1)];
-      const segs: [number, number, number, number][] = [];
-      if (wall.kind === "door") {
-        segs.push([0, 0.14, 0, h], [0.86, 1, 0, h]);
-        if (h > WALL_LOW) segs.push([0.14, 0.86, h * 0.72, h]);
-      } else segs.push([0, 1, 0, h]);
-      for (const [u0, u1, v0, v1] of segs) {
-        poly(faceQuad(u0, u1, v0, v1), face);
-        // 踢脚线
-        if (v0 === 0) poly(faceQuad(u0, u1, 0, Math.min(10, v1)), shade(face, 0.82));
-        // 墙顶：有厚度的一条
-        poly([P(u0, -T / 2, v1), P(u1, -T / 2, v1), P(u1, T / 2, v1), P(u0, T / 2, v1)], shade(style.top, 0.97));
-        // 墙的端面
-        poly([P(u1, -T / 2, v0), P(u1, T / 2, v0), P(u1, T / 2, v1), P(u1, -T / 2, v1)], shade(face, 0.7));
+      const rect = (x0: number, y0: number, x1: number, y1: number, color: number) => g.rect(x0, y0, x1 - x0, y1 - y0).fill(color);
+      if (dir === "N") {
+        // 正面：从地面立起来的矩形；上面一条墙顶
+        const sx = x * TW, sy = y * TH;
+        const face = style.color;
+        const segs: [number, number, number, number][] = wall.kind === "door"
+          ? [[0, 0.16, 0, h], [0.84, 1, 0, h], ...(h > WALL_LOW ? [[0.16, 0.84, h * 0.72, h] as [number, number, number, number]] : [])]
+          : [[0, 1, 0, h]];
+        for (const [u0, u1, v0, v1] of segs) {
+          rect(sx + u0 * TW, sy - v1, sx + u1 * TW, sy - v0, face);
+          if (v0 === 0) rect(sx + u0 * TW, sy - Math.min(10, v1), sx + u1 * TW, sy, shade(face, 0.82));
+          rect(sx + u0 * TW, sy - v1 - T * TH, sx + u1 * TW, sy - v1, style.top);
+          g.rect(sx + u0 * TW, sy - v1 - T * TH, (u1 - u0) * TW, v1 + T * TH).stroke({ width: 1, color: shade(face, 0.75), alpha: 0.6 });
+        }
+        if (wall.kind === "door") rect(sx + 0.16 * TW, sy - 3, sx + 0.84 * TW, sy + 2, 0xb98b62);
+        if (wall.kind === "window") {
+          if (h > WALL_LOW) {
+            const hour = new Date().getHours();
+            const sky = hour >= 19 || hour < 6 ? 0x2f3d66 : hour < 8 || hour >= 17 ? 0xf6c59a : 0xa9d8f5;
+            rect(sx + 0.16 * TW, sy - h * 0.82, sx + 0.84 * TW, sy - h * 0.34, 0xffffff);
+            rect(sx + 0.21 * TW, sy - h * 0.78, sx + 0.79 * TW, sy - h * 0.38, sky);
+            rect(sx + 0.49 * TW, sy - h * 0.78, sx + 0.51 * TW, sy - h * 0.38, 0xffffff);
+          } else rect(sx + 0.2 * TW, sy - h - T * TH, sx + 0.8 * TW, sy - h, 0xa9d8f5);
+        }
+        g.zIndex = y * 10 - 5;
+      } else {
+        // 侧墙：一条竖着的墙顶，加上靠镜头那一端的端面
+        const sx = x * TW, y0 = y * TH;
+        const half = (T * TW) / 2;
+        const solid: [number, number][] = wall.kind === "door" ? [[0, 0.12], [0.88, 1]] : [[0, 1]];
+        for (const [a, b] of solid) {
+          rect(sx - half, y0 + a * TH - h, sx + half, y0 + b * TH - h, style.top);
+          g.rect(sx - half, y0 + a * TH - h, half * 2, (b - a) * TH).stroke({ width: 1, color: shade(style.color, 0.7), alpha: 0.7 });
+          // 墙身：从墙顶垂到地面，颜色稍深
+          rect(sx - half, y0 + b * TH - h, sx + half, y0 + b * TH, shade(style.color, 0.8));
+        }
+        if (wall.kind === "door") rect(sx - half, y0 + 0.12 * TH, sx + half, y0 + 0.88 * TH, 0xb98b62);
+        if (wall.kind === "window" && h > WALL_LOW) rect(sx - half + 2, y0 + 0.25 * TH - h * 0.7, sx + half - 2, y0 + 0.75 * TH - h * 0.7, 0xa9d8f5);
+        g.zIndex = (y + 1) * 10 - 6;
       }
-      if (wall.kind === "door") poly(faceQuad(0.14, 0.86, 0, 3), 0xb98b62);
-      if (wall.kind === "window") {
-        if (h > WALL_LOW) {
-          const hour = new Date().getHours();
-          const sky = hour >= 19 || hour < 6 ? 0x2f3d66 : hour < 8 || hour >= 17 ? 0xf6c59a : 0xa9d8f5;
-          poly(faceQuad(0.18, 0.82, h * 0.32, h * 0.8), 0xffffff);
-          poly(faceQuad(0.23, 0.77, h * 0.36, h * 0.76), sky);
-          poly(faceQuad(0.49, 0.51, h * 0.36, h * 0.76), 0xffffff);
-        } else poly([P(0.2, -T / 2, h + 0.5), P(0.8, -T / 2, h + 0.5), P(0.8, T / 2, h + 0.5), P(0.2, T / 2, h + 0.5)], 0xa9d8f5);
-      }
-      g.zIndex = (x + y) * 10 - 4 + (dir === "N" ? 0.1 : 0);
       this.objects.addChild(g);
       this.staticObjs.push(g);
     }
@@ -333,18 +344,18 @@ export class Scene {
       v.box.zIndex = -1000;
       return;
     }
-    const c = toScreen(f.x + w / 2, f.y + h / 2);
+    // 立牌的底边立在占地范围靠前的位置
+    const c = toScreen(f.x + w / 2, f.y + h - 0.15);
     v.box.position.set(c.x, c.y);
     const sw = standeeWidth(f.def, w, h);
     const sh = STANDEE_H[f.def] ?? def.height;
-    // 影子：铺满占地范围的菱形
-    const foot = [toScreen(f.x + 0.12, f.y + 0.12), toScreen(f.x + w - 0.12, f.y + 0.12), toScreen(f.x + w - 0.12, f.y + h - 0.12), toScreen(f.x + 0.12, f.y + h - 0.12)];
-    v.shadow.poly(foot.flatMap((p) => [p.x - c.x, p.y - c.y])).fill({ color: 0x000000, alpha: 0.1 });
+    // 影子：立牌底边下的一个椭圆
+    v.shadow.ellipse(0, 2, sw * 0.5, 9).fill({ color: 0x000000, alpha: 0.14 });
     const sleeper = lying ? { hair: hex(lying.d.appearance.hair), skin: hex(lying.d.appearance.skin) } : undefined;
     drawStandee(v.g, f.def, def.color, sw, sh, { on: !!f.state?.on, sleeper, foods });
     // 朝向：rot=1 时左右镜像
-    v.g.scale.x = f.rot === 1 ? -1 : 1;
-    v.box.zIndex = (f.x + w / 2 + f.y + h / 2 - 1) * 10 + 1;
+    v.g.scale.x = f.rot === 1 && w === 1 ? -1 : 1;
+    v.box.zIndex = (f.y + h - 0.15) * 10;
   }
 
   // ———————————————————— 每帧 ————————————————————
@@ -382,7 +393,7 @@ export class Scene {
       const onTop = c.run?.phase === "act" && c.run.interaction?.onTop;
       skin.view.visible = !c.hidden;
       // 坐在家具上时排在立牌后面，下半身被挡住，看起来就是坐着
-      skin.view.zIndex = (c.d.pos.x + c.d.pos.y - 1) * 10 + (onTop ? 0.5 : 5);
+      skin.view.zIndex = c.d.pos.y * 10 + (onTop ? -2 : 0);
       this.updateBubble(c);
     }
     this.applyFocus();

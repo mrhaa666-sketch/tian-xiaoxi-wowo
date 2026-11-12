@@ -280,10 +280,9 @@ export class Character {
     const stepLen = SPEED * dt * (this.d.illness ? 0.7 : 1);
     this.moving = true;
     this.pose = "walk";
-    // 屏幕上的左右：x 增大往右下，y 增大往左下
-    const sx = dx - dy;
-    if (Math.abs(sx) > 0.01) this.d.facing = sx > 0 ? 1 : -1;
-    this.back = dx + dy < -0.01;
+    // 镜头正对房间：x 是屏幕左右，y 往上走就是背对镜头
+    if (Math.abs(dx) > 0.01) this.d.facing = dx > 0 ? 1 : -1;
+    this.back = dy < -0.01 && Math.abs(dy) > Math.abs(dx);
     if (dist <= stepLen) {
       this.d.pos.x = tx;
       this.d.pos.y = ty;
@@ -326,9 +325,10 @@ export class Character {
           this.d.pos.y = c.y;
         } else {
           const c = this.game.world.centerOf(f);
-          const sx = c.x - this.d.pos.x - (c.y - this.d.pos.y);
+          const sx = c.x - this.d.pos.x;
           if (Math.abs(sx) > 0.05) this.d.facing = sx > 0 ? 1 : -1;
-          this.back = c.x + c.y < this.d.pos.x + this.d.pos.y;
+          // 家具在角色后面（屏幕上方）时背对镜头去用它
+          this.back = c.y < this.d.pos.y - 0.3;
         }
         if (it.turnsOn) f.state = { ...f.state, on: true };
         if (f.def === "lamp" && it.id === "toggle") f.state = { ...f.state, on: !f.state?.on };
@@ -341,7 +341,7 @@ export class Character {
       case "talk": {
         const other = this.game.chars.find((c) => c.id === step.target || c.name === step.target);
         if (other) {
-          const sx = other.d.pos.x - this.d.pos.x - (other.d.pos.y - this.d.pos.y);
+          const sx = other.d.pos.x - this.d.pos.x;
           if (Math.abs(sx) > 0.05) this.d.facing = sx > 0 ? 1 : -1;
           if (step.line) {
             this.say(step.line);

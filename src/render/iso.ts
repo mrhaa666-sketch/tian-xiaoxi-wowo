@@ -1,16 +1,16 @@
-// 等距投影：一格地板在屏幕上是 128×64 的菱形。
+// 正面斜俯视投影：镜头正对房间、从前上方往下看。
+// 一格地板在屏幕上是 TW × TH 的矩形（纵向有透视压缩），墙是竖直立起来的。
 export const TW = 128;
-export const TH = 64;
+export const TH = 80;
 export const WALL_H = 170;
 export const WALL_LOW = 30;
 
 export function toScreen(x: number, y: number) {
-  return { x: (x - y) * (TW / 2), y: (x + y) * (TH / 2) };
+  return { x: x * TW, y: y * TH };
 }
 
 export function toGrid(sx: number, sy: number) {
-  const a = sx / (TW / 2), b = sy / (TH / 2);
-  return { x: (a + b) / 2, y: (b - a) / 2 };
+  return { x: sx / TW, y: sy / TH };
 }
 
 export function shade(color: number, f: number) {
