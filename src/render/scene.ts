@@ -107,6 +107,9 @@ export class Scene {
     this.camera.addChild(this.floorLayer, this.objects, this.ghostG);
     this.zoom = Math.min(0.7, Math.max(0.35, this.app.screen.width / 1900));
     this.glow.blendMode = "add";
+    // 滤镜默认只按 1 倍分辨率、不抗锯齿地画，手机上缩小后边缘全是锯齿：跟画面保持一致
+    this.lightFilter.resolution = "inherit";
+    this.lightFilter.antialias = "inherit";
     this.app.stage.addChild(this.sky, this.camera, this.glow, this.tint, this.overlay);
     this.camera.filters = [this.lightFilter];
     this.camera.scale.set(this.zoom);

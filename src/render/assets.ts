@@ -36,6 +36,9 @@ async function load(key: string) {
     }
     const tex = await Assets.load<Texture>(url);
     tex.source.scaleMode = "linear";
+    // 缩小视角时大图被缩得很小，生成逐级缩小图，避免闪烁和锯齿
+    tex.source.autoGenerateMipmaps = true;
+    tex.source.updateMipmaps();
     cache.set(key, tex);
     for (const fn of listeners) fn();
   } catch {

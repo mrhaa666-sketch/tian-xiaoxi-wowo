@@ -280,7 +280,7 @@ export class UI {
     let el = document.getElementById("pack-file") as HTMLInputElement | null;
     if (!el) {
       el = document.createElement("input");
-      el.type = "file"; el.id = "pack-file"; el.accept = ".json,application/json"; el.hidden = true;
+      el.type = "file"; el.id = "pack-file"; el.hidden = true; // 不限制类型：有的手机会把 .json 标成不可选
       el.onchange = async () => {
         const f = el!.files?.[0];
         if (!f) return;
@@ -303,8 +303,17 @@ export class UI {
     } catch { /* 没有本地角色包就算了 */ }
   }
 
+  /** 导入成功后要做的事（比如关掉「创建新角色」页），用一次就清掉 */
+  private afterImport: (() => void) | null = null;
+
   private async applyPack(raw: unknown) {
     const { added, problems } = await importPack(this.game, raw);
+    if (added.length && this.afterImport) {
+      this.afterImport();
+      const first = this.game.chars.find((c) => c.name === added[0]);
+      if (first) this.select(first.id);
+    }
+    this.afterImport = null;
     if (added.length) {
       this.game.log("player", `${added.join("、")}搬进来了`);
       this.renderRoster();
@@ -724,6 +733,12 @@ export class UI {
       <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>${c ? "编辑" + esc(c.name) : "创建新角色"}</h2>
         <button class="btn small primary" id="e-save">${c ? "保存" : "搬进来"}</button></header>
       <div class="page-body">
+        ${c ? "" : `<div class="import-card">
+          <div><b>已经有角色包了？</b><span>导入就能直接搬进来，设定和立绘都在里面。</span></div>
+          <button type="button" class="btn primary" id="e-import">从角色包导入</button>
+          ${this.localPacks.length ? `<div class="local-packs">${this.localPacks.map((x, i) => `<button type="button" class="btn small" data-elocal="${i}">＋ ${esc(x.name)}</button>`).join("")}</div>` : ""}
+        </div>
+        <div class="or-line"><span>或者自己写一个</span></div>`}
         <div class="field"><label for="e-name">名字</label><input id="e-name" value="${esc(d.name)}" maxlength="12" /></div>
         <div class="field"><label for="e-persona">性格 / 人设</label>
           <div class="help">AI 会按这段文字来扮演 TA。写得越具体，TA 越像一个真实的人：年龄职业、性格、说话方式、喜好、和其他人的关系。</div>
@@ -783,6 +798,18 @@ export class UI {
       </div>`);
     const $ = <T extends HTMLElement>(s: string) => p.querySelector<T>(s)!;
     $("#e-fill").onclick = () => { $<HTMLTextAreaElement>("#e-schedule").value = SCHEDULE_TEMPLATE; };
+    if (!c) {
+      $("#e-import").onclick = () => { this.afterImport = () => p.close(); this.packFile().click(); };
+      p.querySelectorAll<HTMLElement>("[data-elocal]").forEach((b) => (b.onclick = async () => {
+        const item = this.localPacks[Number(b.dataset.elocal)];
+        try {
+          const r = await fetch(`packs/${item.file}`);
+          if (!r.ok) throw new Error(String(r.status));
+          this.afterImport = () => p.close();
+          await this.applyPack(await r.json());
+        } catch { this.flash(`读取 ${item.file} 失败`); }
+      }));
+    }
     p.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => (b.onclick = () => b.classList.toggle("like")));
     if (c) $("#e-export").onclick = () => this.downloadPack([c.d], c.name);
     p.querySelectorAll<HTMLElement>(".taste-chip").forEach((b) => (b.onclick = () => {

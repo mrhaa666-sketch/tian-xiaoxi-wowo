@@ -305,3 +305,9 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .msg-who { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border-radius: 14px; border: 2px solid transparent; background: none; font: inherit; font-size: 12px; color: var(--muted); opacity: .55; }
 .msg-who.on { border-color: var(--accent); background: var(--accent-soft); color: inherit; opacity: 1; }
 .msg-who:focus-visible { outline: 2px solid var(--accent); }
+.import-card { display: grid; gap: 10px; padding: 14px; border-radius: 16px; background: var(--accent-soft); margin-bottom: 4px; }
+.import-card b { display: block; font-size: 15px; }
+.import-card span { font-size: 12px; color: var(--muted); }
+.import-card .btn { width: 100%; }
+.or-line { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
+.or-line::before, .or-line::after { content: ""; flex: 1; height: 1px; background: var(--line, #e5e0ea); }

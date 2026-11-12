@@ -196,6 +196,8 @@ export class SpriteSkin implements CharSkin {
       img.src = spriteUrl(this.spritesId, `${key}.png`);
       await img.decode();
       const t = Texture.from(img);
+      t.source.autoGenerateMipmaps = true;
+      t.source.updateMipmaps();
       this.textures.set(key, t);
       return t;
     } catch { return null; } finally { this.loading.delete(key); }
