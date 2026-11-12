@@ -51,7 +51,7 @@ export class AnthropicLLM implements LLM {
         model,
         max_tokens: req.maxTokens ?? 4000,
         // 系统提示词是固定的，标记为可缓存，降低重复调用的费用
-        system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
+        system: [{ type: "text", text: this.structured ? req.system : req.system + formatHint(req.schema), cache_control: { type: "ephemeral" } }],
         messages: req.messages,
         output_config: {
           effort: "low",
@@ -78,17 +78,37 @@ export class AnthropicLLM implements LLM {
   }
 }
 
+/** 把 JSON Schema 写成模型能看懂的格式说明（给不支持结构化输出的服务用） */
+export function describeSchema(schema: Record<string, unknown>, indent = ""): string {
+  const sc = schema as { type?: string; properties?: Record<string, Record<string, unknown>>; items?: Record<string, unknown>; enum?: string[] };
+  if (sc.enum) return sc.enum.map((x) => JSON.stringify(x)).join(" | ");
+  if (sc.type === "array") return `[ ${describeSchema(sc.items ?? {}, indent)}, ... ]`;
+  if (sc.type === "object" && sc.properties) {
+    const inner = indent + "  ";
+    return "{\n" + Object.entries(sc.properties).map(([k, v]) => `${inner}"${k}": ${describeSchema(v, inner)}`).join(",\n") + `\n${indent}}`;
+  }
+  return sc.type === "integer" ? "整数" : sc.type === "number" ? "数字" : sc.type === "string" ? "字符串" : "值";
+}
+
+export function formatHint(schema: Record<string, unknown>) {
+  return `\n\n【输出格式】只输出一个 JSON 对象，不要输出其他文字，也不要用代码块包起来。字段必须全部给出，字段名必须和下面完全一致：\n${describeSchema(schema)}`;
+}
+
+export const DEEPSEEK_BASE = "https://api.deepseek.com";
+
 export class OpenAICompatLLM implements LLM {
   private jsonMode = true;
   constructor(private s: AISettings) {}
 
   async complete(req: LLMRequest): Promise<unknown> {
     const model = req.tier === "chat" ? this.s.chatModel : this.s.fastModel;
-    const url = this.s.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+    const base = (this.s.provider === "deepseek" ? this.s.baseUrl || DEEPSEEK_BASE : this.s.baseUrl).replace(/\/+$/, "");
+    const url = base + "/chat/completions";
+    const format = formatHint(req.schema);
     const body: Record<string, unknown> = {
       model,
       max_tokens: req.maxTokens ?? 2000,
-      messages: [{ role: "system", content: req.system + "\n\n只输出一个 JSON 对象，不要输出其他文字。" }, ...req.messages],
+      messages: [{ role: "system", content: req.system + format }, ...req.messages],
     };
     if (this.jsonMode) body.response_format = { type: "json_object" };
     let r;

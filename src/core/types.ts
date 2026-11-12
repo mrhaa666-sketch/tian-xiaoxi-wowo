@@ -224,7 +224,7 @@ export interface NewsItem {
 }
 
 export interface AISettings {
-  provider: "mock" | "anthropic" | "openai";
+  provider: "mock" | "anthropic" | "deepseek" | "openai";
   apiKey: string;
   baseUrl: string; // 兼容 OpenAI 格式的服务地址
   fastModel: string; // 日常行为

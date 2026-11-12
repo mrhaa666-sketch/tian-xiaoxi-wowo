@@ -13,6 +13,7 @@ import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
 import { scoreOptions } from "../sim/autonomy";
 import { exportPack, importPack } from "../sim/pack";
+import { DEEPSEEK_BASE } from "../ai/provider";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -795,8 +796,9 @@ export class UI {
           <select id="s-provider">
             <option value="mock" ${ai.provider === "mock" ? "selected" : ""}>本地模拟（不联网、不花钱）</option>
             <option value="anthropic" ${ai.provider === "anthropic" ? "selected" : ""}>Claude（Anthropic 官方 API）</option>
-            <option value="openai" ${ai.provider === "openai" ? "selected" : ""}>兼容 OpenAI 格式的服务</option>
-          </select><div class="help">兼容 OpenAI 格式：DeepSeek、通义、本地 Ollama 等。</div></div>
+            <option value="deepseek" ${ai.provider === "deepseek" ? "selected" : ""}>DeepSeek</option>
+            <option value="openai" ${ai.provider === "openai" ? "selected" : ""}>其他兼容 OpenAI 格式的服务</option>
+          </select><div class="help" id="s-provider-help"></div></div>
         <div class="field"><label for="s-key">API Key</label><input id="s-key" type="password" value="${esc(ai.apiKey)}" autocomplete="off" />
           <div class="help">只保存在这台设备上，只会发给你选择的 AI 服务。</div></div>
         <div class="field" id="s-base-wrap"><label for="s-base">服务地址</label><input id="s-base" value="${esc(ai.baseUrl)}" inputmode="url" /><div class="help">例如 https://api.deepseek.com/v1</div></div>
@@ -818,14 +820,28 @@ export class UI {
         <button class="btn danger block" id="s-reset">重置存档</button>
       </div>`);
     const $ = <T extends HTMLElement>(sel: string) => p.querySelector<T>(sel)!;
-    const syncBase = () => ($("#s-base-wrap").hidden = $<HTMLSelectElement>("#s-provider").value !== "openai");
+    const HELP: Record<string, string> = {
+      mock: "不调用任何 AI，角色按本地规则生活。",
+      anthropic: "在 console.anthropic.com 申请 API Key。",
+      deepseek: "在 platform.deepseek.com 申请 API Key。日常行为建议用 deepseek-chat；聊天想让 TA 想得更深，可以换成 deepseek-reasoner（更慢）。",
+      openai: "通义、Kimi、本地 Ollama 等，填对服务地址和模型名就行。",
+    };
+    const syncBase = () => {
+      const v = $<HTMLSelectElement>("#s-provider").value;
+      $("#s-base-wrap").hidden = v !== "openai" && v !== "deepseek";
+      $("#s-provider-help").textContent = HELP[v] ?? "";
+    };
     syncBase();
     $<HTMLSelectElement>("#s-provider").onchange = () => {
       syncBase();
+      const v = $<HTMLSelectElement>("#s-provider").value;
       const def = defaultSettings().ai;
-      if ($<HTMLSelectElement>("#s-provider").value === "anthropic" && !/^claude/.test($<HTMLInputElement>("#s-fast").value)) {
-        $<HTMLInputElement>("#s-fast").value = def.fastModel;
-        $<HTMLInputElement>("#s-chat").value = def.chatModel;
+      const fast = $<HTMLInputElement>("#s-fast"), chat = $<HTMLInputElement>("#s-chat"), base = $<HTMLInputElement>("#s-base");
+      if (v === "anthropic" && !/^claude/.test(fast.value)) { fast.value = def.fastModel; chat.value = def.chatModel; }
+      if (v === "deepseek") {
+        if (!/deepseek/.test(base.value)) base.value = DEEPSEEK_BASE;
+        if (!/^deepseek/.test(fast.value)) fast.value = "deepseek-chat";
+        if (!/^deepseek/.test(chat.value)) chat.value = "deepseek-chat";
       }
     };
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
