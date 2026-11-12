@@ -28,7 +28,7 @@ export const ROOM_PRESETS: RoomPreset[] = [
   {
     id: "kitchen", name: "厨房", w: 4, h: 4, floor: "tile", wallStyle: "sage",
     furniture: [
-      { def: "fridge", x: 0, y: 0 }, { def: "stove", x: 1, y: 0 }, { def: "sink", x: 2, y: 0 },
+      { def: "fridge", x: 0, y: 0 }, { def: "stove", x: 1, y: 0 }, { def: "sink", x: 2, y: 0 }, { def: "kitchen_counter", x: 3, y: 0 },
       { def: "table", x: 1, y: 2 }, { def: "chair", x: 1, y: 3 }, { def: "chair", x: 2, y: 3 },
     ],
   },
@@ -122,7 +122,7 @@ export function buildStarterHouse(world: World) {
     { def: "armchair", x: 4, y: 2 }, { def: "lamp", x: 5, y: 4 }, { def: "low_cabinet", x: 0, y: 4 },
   ]);
   room(world, "厨房", 6, 0, 4, 3, "tile", "sage", [
-    { def: "fridge", x: 0, y: 0 }, { def: "stove", x: 1, y: 0 }, { def: "sink", x: 2, y: 0 },
+    { def: "fridge", x: 0, y: 0 }, { def: "stove", x: 1, y: 0 }, { def: "sink", x: 2, y: 0 }, { def: "kitchen_counter", x: 3, y: 0 },
     { def: "table", x: 1, y: 2 }, { def: "chair", x: 3, y: 2 },
   ]);
   room(world, "浴室", 6, 3, 3, 2, "tile", "sky", [{ def: "bathtub", x: 0, y: 0 }, { def: "medicine", x: 2, y: 0 }, { def: "toilet", x: 0, y: 1 }]);

@@ -21,8 +21,9 @@ const STANDEE_H: Record<string, number> = {
 function standeeWidth(def: string, w: number, h: number) {
   // 和占地格数不成比例的家具单独指定宽度（像素）
   const thin: Record<string, number> = {
-    lamp: 44, plant: 60, chair: 54, toilet: 58, medicine: 64, lamp_desk: 54, plant_small: 58, plant_big: 84,
+    lamp: 44, plant: 60, chair: 54, toilet: 64, medicine: 64, lamp_desk: 54, plant_small: 58, plant_big: 84,
     nightstand: 74, floor_cushion: 86, beanbag: 92, mirror_stand: 62, clothes_rack: 92, coffee_table: 150, dresser: 92,
+    bar_stool: 48, round_table: 100, microwave_cabinet: 88, washbasin: 84, washing_machine: 88, laundry_basket: 78, towel_rack: 62,
   };
   if (thin[def]) return thin[def];
   return 96 + (w - 1) * 118;
