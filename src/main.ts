@@ -15,6 +15,7 @@ async function boot() {
   scene.insets = () => ui.insets();
   await scene.init(ui.stage);
   ui.onLayout = () => scene.refit();
+  ui.onPlanApplied = () => { scene.showAll(); setView(); };
   // 手机竖屏放不下整栋房子的细节：一开始先看第一个角色所在的房间
   const first = game.chars[0];
   if (first && game.world.rooms().includes(first.room)) scene.showRoom(first.room, true);

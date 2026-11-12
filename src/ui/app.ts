@@ -9,6 +9,8 @@ import { PERSONA_TEMPLATE, SCHEDULE_TEMPLATE, defaultSettings, newCharacter, ran
 import { Game } from "../sim/game";
 import { FLOORS, FOODS, FURNITURE, WALL_STYLES } from "../world/catalog";
 import { ROOM_PRESETS } from "../world/presets";
+import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
+import { Planner } from "./planner";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -71,6 +73,8 @@ export class UI {
   onSettingsChanged?: () => void;
   /** 底部抽屉打开/关闭后，画面要重新排版 */
   onLayout?: () => void;
+  /** 户型应用到房子之后 */
+  onPlanApplied?: () => void;
 
   constructor(host: HTMLElement, private game: Game, private brain: Brain) {
     this.root = host;
@@ -436,6 +440,7 @@ export class UI {
       hint = "点家具、墙或地板把它拆掉。";
     }
     body.innerHTML = `<div class="sheet-head"><h2>建造</h2><button class="btn small primary" id="build-done">完成</button></div>
+      <button class="plan-entry" id="open-plan"><span class="pe-ic">▦</span><span><b>户型设计（DIY 公寓）</b><small>在平面图上拼房间，一键生成整套房子</small></span></button>
       <div class="chips-row tools">${tools.map(([k, n]) => `<button class="chip-btn ${b.tool === k ? "on" : ""}" data-tool="${k}">${n}</button>`).join("")}</div>
       ${opts}<p class="hint">${hint} 两指拖动画面、捏合缩放。</p>`;
     const on = (sel: string, fn: (el: HTMLElement) => void) => body.querySelectorAll<HTMLElement>(sel).forEach((x) => (x.onclick = () => { fn(x); this.renderBuild(); }));
@@ -446,10 +451,40 @@ export class UI {
     on("[data-wall]", (x) => (b.wallStyle = x.dataset.wall!));
     on("[data-room]", (x) => (b.room = x.dataset.room!));
     body.querySelector<HTMLElement>("#build-done")!.onclick = () => this.closeSheet();
+    body.querySelector<HTMLElement>("#open-plan")!.onclick = () => this.openPlanner();
     const rn = body.querySelector<HTMLInputElement>("#room-name");
     if (rn) rn.oninput = () => (b.roomName = rn.value.trim() || "新房间");
     const aw = body.querySelector<HTMLInputElement>("#auto-walls");
     if (aw) aw.onchange = () => (b.autoWalls = aw.checked);
+  }
+
+  // ———————————————————— 户型设计 ————————————————————
+
+  openPlanner() {
+    const plan: Plan = planFromWorld(this.game.world);
+    const p = this.page("");
+    p.classList.add("planner");
+    new Planner(p, plan, (final) => {
+      applyPlan(this.game.world, final);
+      // 角色挪到新房子里能站的地方，手上的事情作废
+      for (const c of this.game.chars) {
+        c.stopCurrent();
+        c.queue = [];
+        c.forcedUntil = 0;
+        const t = this.game.world.randomTileIn(final.rooms.find((r) => r.kind === "living")?.name) ?? this.game.world.randomTileIn();
+        if (t) c.d.pos = { x: t.x + 0.5, y: t.y + 0.5 };
+        this.game.emit(c, "主人把整个家重新装修了一遍，房间和家具的位置都变了。", 2);
+      }
+      this.game.log("player", "按新的户型重新装修了整个家");
+      this.game.changed();
+      this.game.save();
+      p.close();
+      this.closeSheet();
+      this.renderAll();
+      this.onPlanApplied?.();
+      this.flash("新户型已经生成好了");
+    }, (t, ok) => this.confirm(t, ok), (t) => this.flash(t));
+    p.querySelectorAll<HTMLElement>("[data-close]").forEach((b) => (b.onclick = () => p.close()));
   }
 
   // ———————————————————— 全屏页面、确认框、提示 ————————————————————
