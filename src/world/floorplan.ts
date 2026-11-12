@@ -65,13 +65,13 @@ export const ROOM_KINDS: RoomKind[] = [
   },
   {
     id: "study", name: "书房", w: 3, h: 4, minW: 2, minH: 2, floor: "mint", wall: "lilac", color: "#cdeadf", window: true,
-    furnish: [{ def: "bookshelf", at: "top-left" }, { def: "desk", at: "top-right" }, { def: "office_chair", at: "center" }, { def: "easel", at: "corner-br" }, { def: "plant", at: "corner-bl" }],
+    furnish: [{ def: "desk", at: "top-right" }, { def: "bookshelf", at: "top-left" }, { def: "office_chair", at: "center" }, { def: "easel", at: "corner-br" }, { def: "plant", at: "corner-bl" }],
   },
   {
     id: "music", name: "音乐室", w: 4, h: 4, minW: 3, minH: 3, floor: "wood", wall: "night", color: "#c9cdef", window: true,
     furnish: [
       { def: "upright_piano", at: "top-left" }, { def: "keyboard_stand", at: "top-right" }, { def: "mic_stand", at: "center" },
-      { def: "music_stand", at: "left" }, { def: "electric_guitar_stand", at: "right" }, { def: "speaker", at: "corner-bl" }, { def: "guitar_stand", at: "corner-br" },
+      { def: "guitar_stand", at: "corner-br" }, { def: "electric_guitar_stand", at: "right" }, { def: "speaker", at: "corner-bl" }, { def: "music_stand", at: "left" },
     ],
   },
   {
@@ -151,33 +151,59 @@ export function exteriorEdges(plan: Plan, r: PlanRoom): { key: string; side: "to
   return out;
 }
 
+// 开门的「代价」：走廊、客厅、玄关这种公共空间便宜，卧室、浴室这种私密房间贵。
+// 两个房间之间开门的代价 = 两边代价之和，按代价从低到高连通所有房间。
+const DOOR_COST: Record<string, number> = {
+  hall: 0, living: 1, entry: 1, dining: 2, yard: 2, balcony: 2, kitchen: 3, empty: 3,
+  study: 4, game: 4, music: 4, bedroom: 5, master: 5, laundry: 5, bathroom: 6,
+};
+
 /**
- * 整理门：去掉已经不在房间之间、也不是大门的门；
- * 每对相邻、但还没有门的房间，在共用墙的中间开一扇；
- * 保证有一扇通向外面的大门（优先玄关、其次客厅，开在房间下边）。
+ * 整理门：
+ * 1. 去掉已经不在两个房间之间的门（外墙上保留一扇大门）。
+ * 2. 只补必要的门：保证每个房间都能走到，优先往走廊、客厅这些公共空间开门。
+ *    玩家自己加的门都保留。
+ * 3. 保证有一扇通向外面的大门（优先玄关、其次客厅，开在房间下边）。
  */
 export function ensureDoors(plan: Plan) {
-  const valid = new Set<string>();
-  const doors = new Set(plan.doors);
-  for (let i = 0; i < plan.rooms.length; i++) {
-    for (let j = i + 1; j < plan.rooms.length; j++) {
-      const edges = sharedEdges(plan.rooms[i], plan.rooms[j]);
+  const rs = plan.rooms;
+  const edgeRooms = new Map<string, [number, number]>(); // 墙边 → 两边房间的下标
+  const pairs: { a: number; b: number; edges: string[] }[] = [];
+  for (let i = 0; i < rs.length; i++) {
+    for (let j = i + 1; j < rs.length; j++) {
+      const edges = sharedEdges(rs[i], rs[j]);
       if (!edges.length) continue;
-      edges.forEach((e) => valid.add(e));
-      if (!edges.some((e) => doors.has(e))) doors.add(edges[Math.floor((edges.length - 1) / 2)]);
+      edges.forEach((e) => edgeRooms.set(e, [i, j]));
+      pairs.push({ a: i, b: j, edges });
     }
   }
-  const indoor = plan.rooms.filter((r) => !KIND_BY_ID[r.kind]?.outdoor);
-  const ext = new Map<string, string>(); // 外墙边 → 房间 id
-  for (const r of indoor) for (const e of exteriorEdges(plan, r)) ext.set(e.key, r.id);
+  const indoor = rs.filter((r) => !KIND_BY_ID[r.kind]?.outdoor);
+  const ext = new Set<string>();
+  for (const r of indoor) for (const e of exteriorEdges(plan, r)) ext.add(e.key);
+
+  // 1. 去掉无效的门
+  const doors = new Set<string>();
   let hasFront = false;
-  for (const d of [...doors]) {
-    if (valid.has(d)) continue;
-    if (ext.has(d) && !hasFront) { hasFront = true; continue; }
-    doors.delete(d);
+  for (const d of plan.doors) {
+    if (edgeRooms.has(d)) doors.add(d);
+    else if (ext.has(d) && !hasFront) { doors.add(d); hasFront = true; }
   }
-  // 有院子或阳台连着时，可以从那里出门；否则在外墙上开一扇大门
-  const touchesOutdoor = plan.rooms.some((r) => KIND_BY_ID[r.kind]?.outdoor && indoor.some((o) => sharedEdges(r, o).length));
+
+  // 2. 用并查集按现有的门把房间连起来，再按代价补门
+  const parent = rs.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+  for (const d of doors) { const p = edgeRooms.get(d); if (p) union(p[0], p[1]); }
+  const cost = (i: number) => DOOR_COST[rs[i].kind] ?? 3;
+  pairs.sort((x, y) => cost(x.a) + cost(x.b) - (cost(y.a) + cost(y.b)) || y.edges.length - x.edges.length);
+  for (const p of pairs) {
+    if (find(p.a) === find(p.b)) continue;
+    doors.add(p.edges[Math.floor((p.edges.length - 1) / 2)]);
+    union(p.a, p.b);
+  }
+
+  // 3. 大门：有院子或阳台连着时，可以从那里出门
+  const touchesOutdoor = rs.some((r) => KIND_BY_ID[r.kind]?.outdoor && indoor.some((o) => sharedEdges(r, o).length));
   if (!hasFront && !touchesOutdoor && indoor.length) {
     const pick = indoor.find((r) => r.kind === "entry") ?? indoor.find((r) => r.kind === "living") ?? indoor[0];
     const edges = exteriorEdges(plan, pick);
@@ -287,60 +313,86 @@ function doorTiles(plan: Plan) {
   return s;
 }
 
-/** 按房间类型摆家具，摆不下的跳过；最后把走不到的家具去掉 */
+/** 房间里从门口能走到的格子 */
+function reachableIn(world: World, r: PlanRoom, starts: [number, number][]) {
+  const seen = new Set<string>();
+  const queue = starts.filter(([x, y]) => world.walkable(x, y));
+  for (const [x, y] of queue) seen.add(key(x, y));
+  while (queue.length) {
+    const [x, y] = queue.shift()!;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < r.x || ny < r.y || nx >= r.x + r.w || ny >= r.y + r.h) continue;
+      const k = key(nx, ny);
+      if (seen.has(k) || !world.walkable(nx, ny) || !world.passable(x, y, nx, ny)) continue;
+      seen.add(k);
+      queue.push([nx, ny]);
+    }
+  }
+  return seen;
+}
+
+/**
+ * 按房间类型摆家具。每件家具先试它的首选位置，放不下就按离首选位置的远近试房间里的其他位置；
+ * 每放一件都检查：门口没被堵、从门口仍然能走到每一件已经摆好的家具。实在放不下就不放。
+ */
 function furnish(world: World, plan: Plan, r: PlanRoom) {
   const kind = KIND_BY_ID[r.kind];
   if (!kind) return;
   const reserved = doorTiles(plan);
+  const inRoom = (x: number, y: number) => x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+  // 起点：这个房间里挨着门的格子；没有门（不应该发生）就用房间里第一格
+  let starts = [...reserved].map((k) => k.split(",").map(Number) as [number, number]).filter(([x, y]) => inRoom(x, y));
+  if (!starts.length) starts = [[r.x, r.y]];
   const placed: string[] = [];
-  const tryAt = (def: string, x: number, y: number, rot: 0 | 1) => {
-    const d = FURNITURE_BY_ID[def];
-    if (!d) return null;
-    const w = rot ? d.h : d.w, h = rot ? d.w : d.h;
-    if (x < r.x || y < r.y || x + w > r.x + r.w || y + h > r.y + r.h) return null;
-    if (!d.walkable) for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) if (reserved.has(key(x + dx, y + dy))) return null;
-    return world.addFurniture(def, x, y, rot);
+
+  const allReachable = () => {
+    // 从其中一个门口出发，要能走到其他所有门口和每一件家具
+    const reach = reachableIn(world, r, [starts[0]]);
+    if (starts.some(([x, y]) => !reach.has(key(x, y)))) return false;
+    return placed.every((id) => {
+      const f = world.getFurniture(id);
+      if (!f || FURNITURE_BY_ID[f.def].walkable) return true;
+      return world.accessSpots(f).some((sp) => reach.has(key(sp.x, sp.y)));
+    });
   };
+
   for (const item of kind.furnish) {
     const d = FURNITURE_BY_ID[item.def];
     if (!d) continue;
     const rot = item.rot ?? 0;
     const w = rot ? d.h : d.w, h = rot ? d.w : d.h;
+    if (w > r.w || h > r.h) continue;
     const cx = r.x + Math.floor((r.w - w) / 2), cy = r.y + Math.floor((r.h - h) / 2);
     const right = r.x + r.w - w, bottom = r.y + r.h - h;
-    let candidates: [number, number][] = [];
-    switch (item.at) {
-      case "top-left": candidates = [[r.x, r.y], [r.x + 1, r.y]]; break;
-      case "top-center": candidates = [[cx, r.y], [cx - 1, r.y], [cx + 1, r.y]]; break;
-      case "top-right": candidates = [[right, r.y], [right - 1, r.y]]; break;
-      case "top": for (let x = r.x; x <= right; x++) candidates.push([x, r.y]); break;
-      case "center": candidates = [[cx, cy], [cx, cy + 1], [cx - 1, cy]]; break;
-      case "below-center": candidates = [[cx, cy + 1], [cx, cy + 2], [cx, bottom]]; break;
-      case "left": candidates = [[r.x, cy], [r.x, cy + 1], [r.x, cy - 1]]; break;
-      case "right": candidates = [[right, cy], [right, cy + 1], [right, cy - 1]]; break;
-      case "corner-bl": candidates = [[r.x, bottom], [r.x + 1, bottom]]; break;
-      case "corner-br": candidates = [[right, bottom], [right - 1, bottom]]; break;
-    }
+    const pref: Record<string, [number, number]> = {
+      "top-left": [r.x, r.y], "top-center": [cx, r.y], "top-right": [right, r.y], top: [r.x, r.y],
+      center: [cx, cy], "below-center": [cx, Math.min(bottom, cy + 1)], left: [r.x, cy], right: [right, cy],
+      "corner-bl": [r.x, bottom], "corner-br": [right, bottom],
+    };
+    const [px, py] = pref[item.at];
+    // 候选位置：靠墙的家具优先贴着上边墙，其余按离首选位置的距离
+    const candidates: [number, number][] = [];
+    for (let x = r.x; x <= right; x++) for (let y = r.y; y <= bottom; y++) candidates.push([x, y]);
+    const wallItem = item.at.startsWith("top");
+    candidates.sort((a, b) => {
+      const da = Math.abs(a[0] - px) + Math.abs(a[1] - py) * (wallItem ? 3 : 1);
+      const db = Math.abs(b[0] - px) + Math.abs(b[1] - py) * (wallItem ? 3 : 1);
+      return da - db;
+    });
     for (const [x, y] of candidates) {
-      const f = tryAt(item.def, x, y, rot);
-      if (f) {
+      let blocked = false;
+      if (!d.walkable) for (let dx = 0; dx < w && !blocked; dx++) for (let dy = 0; dy < h; dy++) if (reserved.has(key(x + dx, y + dy))) { blocked = true; break; }
+      if (blocked) continue;
+      const f = world.addFurniture(item.def, x, y, rot);
+      if (!f) continue;
+      placed.push(f.uid);
+      if (d.walkable || allReachable()) {
         if (item.back) f.back = true;
-        placed.push(f.uid);
         break;
       }
+      placed.pop();
+      world.removeFurniture(f.uid);
     }
-  }
-  // 从房间的门口出发，走不到的家具去掉
-  const starts = [...reserved].map((k) => k.split(",").map(Number) as [number, number]).filter(([x, y]) => world.tile(x, y)?.room === r.name && world.walkable(x, y));
-  if (!starts.length) {
-    for (let x = r.x; x < r.x + r.w && !starts.length; x++) for (let y = r.y; y < r.y + r.h; y++) if (world.walkable(x, y)) { starts.push([x, y]); break; }
-  }
-  if (!starts.length) return;
-  const [sx, sy] = starts[0];
-  for (const id of placed) {
-    const f = world.getFurniture(id);
-    if (!f || FURNITURE_BY_ID[f.def].walkable) continue;
-    const ok = world.accessSpots(f).some((s) => (s.x === sx && s.y === sy) || world.findPath(sx, sy, s.x, s.y, false, 600));
-    if (!ok) world.removeFurniture(id);
   }
 }

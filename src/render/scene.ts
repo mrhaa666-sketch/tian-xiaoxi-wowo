@@ -24,6 +24,8 @@ function standeeWidth(def: string, w: number, h: number) {
     lamp: 44, plant: 60, chair: 54, toilet: 64, medicine: 64, lamp_desk: 54, plant_small: 58, plant_big: 84,
     nightstand: 74, floor_cushion: 86, beanbag: 92, mirror_stand: 62, clothes_rack: 92, coffee_table: 150, dresser: 92,
     bar_stool: 48, round_table: 100, microwave_cabinet: 88, washbasin: 84, washing_machine: 88, laundry_basket: 78, towel_rack: 62,
+    office_chair: 62, gaming_chair: 66, easel: 80, guitar_stand: 50, electric_guitar_stand: 50, speaker: 62, mic_stand: 40,
+    music_stand: 58, headphone_desk: 84, game_tv: 104, arcade_machine: 80, bookshelf_low: 190, keyboard_stand: 190,
   };
   if (thin[def]) return thin[def];
   return 96 + (w - 1) * 118;

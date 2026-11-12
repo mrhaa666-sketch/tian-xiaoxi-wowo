@@ -318,7 +318,7 @@ export class Planner {
     const s = this.plan.rooms.find((r) => r.id === this.sel);
     const m = this.mode;
     const hint = m.t === "place" ? `在格子上点一下放下${KIND_BY_ID[m.kind].name}，或者拖出一个范围。`
-      : m.t === "door" ? "点房间之间的墙加门，再点一次去掉。相邻房间之间会自动保留一扇门。"
+      : m.t === "door" ? "点房间之间的墙加门，再点一次去掉。如果去掉后有房间走不到，会自动补一扇门。"
       : s ? "拖动房间挪位置，拖右下角的圆点改大小。" : "点下面的房间类型开始拼，点已有的房间可以修改。";
     const selPanel = s ? `<div class="pl-sel">
         <input id="pl-name" value="${esc(s.name)}" maxlength="10" aria-label="房间名" />
