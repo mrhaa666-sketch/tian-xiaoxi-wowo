@@ -32,13 +32,13 @@ export class ProceduralSkin implements CharSkin {
     const blink = (t * 1000) % 3800 < 130;
 
     // 姿势：躺下时整体侧过来，坐下时降低
-    this.inner.rotation = pose === "lie" ? -1.35 * c.d.facing : 0;
-    this.inner.y = pose === "lie" ? -14 : pose === "sit" ? 8 : 0;
-    this.inner.x = pose === "lie" ? -6 * c.d.facing : 0;
+    this.inner.rotation = 0;
+    this.inner.y = pose === "sit" ? 14 : 0;
+    this.inner.x = 0;
     this.inner.scale.x = c.d.facing;
     this.shadow.visible = pose !== "lie";
 
-    const key = [pose, Math.round(bob * 2), Math.round(step * 3), blink, c.back, c.d.emotion, c.d.illness ? 1 : 0, JSON.stringify(a)].join("|");
+    const key = [pose, Math.round(bob * 2), Math.round(step * 3), blink, false, c.d.emotion, c.d.illness ? 1 : 0, JSON.stringify(a)].join("|");
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -67,10 +67,10 @@ export class ProceduralSkin implements CharSkin {
     const hy = y0 - 74;
     // 后发
     if (a.hairStyle === 1) g.roundRect(-26, hy - 6, 52, 46, 18).fill(hair); // 长发
-    if (a.hairStyle === 3) g.circle(c.back ? 0 : -22, hy - 20, 12).fill(hair).stroke({ width: 1.5, color: line }); // 马尾
+    if (a.hairStyle === 3) g.circle(false ? 0 : -22, hy - 20, 12).fill(hair).stroke({ width: 1.5, color: line }); // 马尾
     g.circle(0, hy, 27).fill(c.d.illness ? shade(skin, 0.95) : skin).stroke({ width: 2, color: line });
     // 前发
-    if (c.back) {
+    if (false) {
       g.circle(0, hy - 2, 27).fill(hair).stroke({ width: 2, color: line });
     } else {
       g.moveTo(-28, hy + 2).arc(0, hy, 28, Math.PI, 0).lineTo(28, hy + 2).quadraticCurveTo(14, hy - 10, 4, hy - 2).quadraticCurveTo(-8, hy - 12, -28, hy + 2).fill(hair).stroke({ width: 2, color: line });
@@ -79,8 +79,8 @@ export class ProceduralSkin implements CharSkin {
 
     const f = this.face;
     f.clear();
-    if (c.back || pose === "lie" && c.d.emotion === "sleepy") {
-      if (!c.back) this.drawClosedEyes(f, hy);
+    if (false || pose === "lie" && c.d.emotion === "sleepy") {
+      if (!false) this.drawClosedEyes(f, hy);
       return;
     }
     const eyeC = hex(a.eyes);

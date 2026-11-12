@@ -7,7 +7,7 @@ import { World, uid } from "../world/world";
 import { Character, clamp } from "./character";
 import { defaultSettings, sampleCharacters } from "./defaults";
 
-const SAVE_KEY = "wowo-save-v1";
+const SAVE_KEY = "wowo-save-v2"; // v2：房子改成娃娃屋式的房间模块，旧存档不兼容
 
 export interface GameEvent {
   t: number;
@@ -76,7 +76,7 @@ export class Game {
   }
 
   static fresh(): Game {
-    const world = new World({ tiles: {}, walls: {}, furniture: [], foods: [] });
+    const world = new World({ rooms: [], furniture: [], foods: [] });
     buildStarterHouse(world);
     const save: SaveData = {
       version: 1, world: world.data, characters: sampleCharacters(), settings: defaultSettings(),
@@ -122,9 +122,9 @@ export class Game {
 
   addCharacter(d: CharacterData, announce = true) {
     // 放到可以站的地方
-    if (!this.world.walkable(Math.floor(d.pos.x), Math.floor(d.pos.y))) {
-      const t = this.world.randomTileIn();
-      if (t) d.pos = { x: t.x + 0.5, y: t.y + 0.5 };
+    if (typeof d.pos.z !== "number" || !this.world.roomOfPos(d.pos)) {
+      const t = this.world.randomSpotIn();
+      if (t) d.pos = t;
     }
     const c = new Character(d, this);
     this.chars.push(c);
@@ -248,15 +248,16 @@ export class Game {
     const tables = this.world.data.furniture.filter((f) => FURNITURE_BY_ID[f.def].interactions.some((i) => i.tags?.includes("eat")));
     let best: { uid: string; d: number } | null = null;
     for (const t of tables) {
-      const cc = this.world.centerOf(t);
-      const d = Math.hypot(cc.x - c.d.pos.x, cc.y - c.d.pos.y);
+      const cc = this.world.posOf(t);
+      const d = Math.hypot(cc.x - c.d.pos.x, (cc.y - c.d.pos.y) * 3);
       if (!best || d < best.d) best = { uid: t.uid, d };
     }
     if (best) {
       const t = this.world.getFurniture(best.uid)!;
-      this.world.data.foods.push({ uid: uid("food"), kind: foodId, furniture: t.uid, x: t.x, y: t.y, forChar: c.id });
-      this.log("player", `给${c.name}准备了${def.name}，放在${this.world.roomOf(t.x, t.y)}的餐桌上`);
-      this.emit(c, `主人给你准备了${def.name}，放在${this.world.roomOf(t.x, t.y)}的餐桌上。`, 3);
+      const room = this.world.getRoom(t.room)?.name ?? "";
+      this.world.data.foods.push({ uid: uid("food"), kind: foodId, furniture: t.uid, forChar: c.id });
+      this.log("player", `给${c.name}准备了${def.name}，放在${room}的餐桌上`);
+      this.emit(c, `主人给你准备了${def.name}，放在${room}的餐桌上。`, 3);
     } else {
       c.d.needs.hunger = clamp(c.d.needs.hunger + def.hunger);
       c.d.needs.mood = clamp(c.d.needs.mood + def.mood);
@@ -276,7 +277,8 @@ export class Game {
       this.log("system", "家里没有空着的床");
       return;
     }
-    beds.sort((a, b) => Math.hypot(a.x - c.d.pos.x, a.y - c.d.pos.y) - Math.hypot(b.x - c.d.pos.x, b.y - c.d.pos.y));
+    const dist = (f: (typeof beds)[number]) => { const p = this.world.posOf(f); return Math.hypot(p.x - c.d.pos.x, (p.y - c.d.pos.y) * 3); };
+    beds.sort((a, b) => dist(a) - dist(b));
     const it = c.d.illness ? "rest" : "nap";
     const minutes = c.d.illness ? 120 : 30;
     c.setPlan([{ do: "use", target: beds[0].uid, interaction: it, minutes }]);
@@ -297,7 +299,7 @@ export class Game {
     const t = tables[0];
     if (!t) return;
     const kind = c.d.illness ? "porridge" : Math.random() < 0.5 ? "noodle" : "rice";
-    this.world.data.foods.push({ uid: uid("food"), kind, furniture: t.uid, x: t.x, y: t.y });
+    this.world.data.foods.push({ uid: uid("food"), kind, furniture: t.uid });
     this.log("event", `${c.name}做好了${FOOD_BY_ID[kind].name}`, c.id);
     for (const o of this.chars) if (o !== c) this.emit(o, `${c.name}做好了${FOOD_BY_ID[kind].name}，放在餐桌上。`, 1);
   }

@@ -19,7 +19,8 @@ const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 function find(game: Game, c: Character, def: string, interaction?: string): PlanStep | null {
   const list = game.world.data.furniture.filter((f) => f.def === def && !game.occupantOf(f.uid));
   if (!list.length) return null;
-  list.sort((a, b) => Math.hypot(a.x - c.d.pos.x, a.y - c.d.pos.y) - Math.hypot(b.x - c.d.pos.x, b.y - c.d.pos.y));
+  const dist = (f: (typeof list)[number]) => { const p = game.world.posOf(f); return Math.hypot(p.x - c.d.pos.x, (p.y - c.d.pos.y) * 3); };
+  list.sort((a, b) => dist(a) - dist(b));
   const it = interaction ?? FURNITURE_BY_ID[def].interactions[0]?.id;
   return { do: "use", target: list[0].uid, interaction: it };
 }

@@ -4,8 +4,7 @@ import { getNews } from "./ai/news";
 import { Game } from "./sim/game";
 import { Scene, type Ghost } from "./render/scene";
 import { UI } from "./ui/app";
-import { FURNITURE_BY_ID } from "./world/catalog";
-import { ROOM_PRESETS, autoWalls, stampPreset } from "./world/presets";
+import { ROOM_TYPE_BY_ID } from "./world/catalog";
 
 async function boot() {
   const game = Game.load();
@@ -15,7 +14,23 @@ async function boot() {
   const scene = new Scene(game);
   await scene.init(ui.stage);
 
-  ui.onSelect = (id) => (scene.selected = id);
+  const setView = () => { ui.view = scene.view; ui.renderView(); };
+  ui.onView = (v) => {
+    if (v.mode === "all") scene.showAll();
+    else if (v.mode === "room") scene.showRoom(v.uid);
+    else scene.stepRoom(v.dir);
+    setView();
+  };
+  ui.onSelect = (id) => {
+    scene.selected = id;
+    // 单间模式下选中角色：跳到 TA 所在的房间；全景模式下重新排版给详情面板让位
+    const c = id ? game.byId(id) : null;
+    const r = c ? game.world.roomOfPos(c.d.pos) : null;
+    if (scene.view.mode === "room" && r) scene.showRoom(r.uid);
+    else scene.refit();
+    setView();
+  };
+  window.addEventListener("resize", () => setTimeout(() => scene.refit(true), 50));
   ui.onSettingsChanged = () => brain.reconfigure();
   brain.onStatus = () => ui.renderTop();
 
@@ -33,6 +48,12 @@ async function boot() {
     game.tick(dt);
     brain.tick();
     scene.update(now / 1000);
+    // 单间模式下，选中的角色走去别的房间时镜头跟过去
+    if (scene.view.mode === "room" && scene.selected) {
+      const c = game.byId(scene.selected);
+      const r = c && !c.moving ? game.world.roomOfPos(c.d.pos) : null;
+      if (r && r.uid !== scene.view.uid) { scene.showRoom(r.uid); setView(); }
+    }
     uiAcc += dt;
     if (uiAcc > 0.5) {
       uiAcc = 0;
@@ -41,6 +62,7 @@ async function boot() {
       if (dirty) {
         dirty = false;
         ui.renderRoster();
+        ui.renderView();
         if (!ui.build.on) ui.renderLog();
       }
     }
@@ -59,7 +81,7 @@ async function boot() {
   const canvas = scene.app.canvas;
   const pointers = new Map<number, { x: number; y: number }>();
   let dragStart: { x: number; y: number; moved: boolean; button: number } | null = null;
-  let paintStart: { x: number; y: number } | null = null;
+  let dragging: string | null = null; // 正在拖动的家具
   let pinchDist = 0;
 
   const local = (e: PointerEvent | WheelEvent) => {
@@ -67,79 +89,87 @@ async function boot() {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
-  /** 鼠标指向的格子和最近的边 */
-  const hoverInfo = (sx: number, sy: number) => {
-    const g = scene.screenToGrid(sx, sy);
-    const tx = Math.floor(g.x), ty = Math.floor(g.y);
-    const fx = g.x - tx, fy = g.y - ty;
-    const opts = [
-      { d: fy, x: tx, y: ty, dir: "N" as const },
-      { d: 1 - fy, x: tx, y: ty + 1, dir: "N" as const },
-      { d: fx, x: tx, y: ty, dir: "W" as const },
-      { d: 1 - fx, x: tx + 1, y: ty, dir: "W" as const },
-    ].sort((a, b) => a.d - b.d);
-    return { tx, ty, edge: opts[0] };
+  /** 鼠标在房间里对应的立牌摆放位置 */
+  const placeAt = (sx: number, sy: number) => {
+    const hit = scene.pickRoom(sx, sy);
+    if (!hit) return null;
+    return { room: hit.room, x: hit.x, z: Math.max(0.04, Math.min(0.92, hit.onWall ? 0.05 : hit.z)) };
   };
 
   const updateGhost = (sx: number, sy: number) => {
     const b = ui.build;
-    if (!b.on) { scene.ghost = null; return; }
-    const { tx, ty, edge } = hoverInfo(sx, sy);
     const w = game.world;
     let gh: Ghost | null = null;
-    if (b.tool === "floor") {
-      if (paintStart) {
-        const x0 = Math.min(paintStart.x, tx), y0 = Math.min(paintStart.y, ty);
-        gh = { kind: "rect", x: x0, y: y0, w: Math.abs(tx - paintStart.x) + 1, h: Math.abs(ty - paintStart.y) + 1, ok: true };
-      } else gh = { kind: "tile", x: tx, y: ty, ok: true };
-    } else if (b.tool === "wall" || b.tool === "door" || b.tool === "window") {
-      gh = { kind: "edge", x: edge.x, y: edge.y, dir: edge.dir, ok: true };
-    } else if (b.tool === "furniture") {
-      gh = { kind: "furniture", x: tx, y: ty, def: b.furniture, rot: b.rot, ok: w.canPlace(b.furniture, tx, ty, b.rot) };
-    } else if (b.tool === "room") {
-      const p = ROOM_PRESETS.find((r) => r.id === b.room)!;
-      gh = { kind: "rect", x: tx, y: ty, w: p.w, h: p.h, ok: true };
-    } else if (b.tool === "erase") {
-      const f = w.furnitureAt(tx, ty);
-      if (f) {
-        const def = FURNITURE_BY_ID[f.def];
-        gh = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: false };
-        void def;
-      } else if (edge.d < 0.2 && w.wall(edge.x, edge.y, edge.dir)) gh = { kind: "edge", x: edge.x, y: edge.y, dir: edge.dir, ok: false };
-      else gh = { kind: "tile", x: tx, y: ty, ok: !w.tile(tx, ty) };
+    if (b.on) {
+      if (b.tool === "room") {
+        const { gx, gy } = scene.cellAt(sx, sy);
+        const t = ROOM_TYPE_BY_ID[b.room];
+        gh = { kind: "room", gx, gy, w: t.w, ok: w.canPlaceRoom(gx, gy, t.w) };
+      } else if (b.tool === "furniture" || (b.tool === "move" && dragging)) {
+        const p = placeAt(sx, sy);
+        const def = dragging ? w.getFurniture(dragging)?.def : b.furniture;
+        if (p && def) gh = { kind: "furniture", room: p.room.uid, x: p.x, z: p.z, def, ok: w.canPlaceFurniture(def, p.room.uid, p.x, p.z) };
+      } else if (b.tool === "move" || b.tool === "erase") {
+        const f = scene.pickFurniture(sx, sy);
+        if (f) gh = { kind: "highlight-furniture", uid: f.uid };
+        else if (b.tool === "erase") {
+          const r = scene.pickRoom(sx, sy)?.room;
+          if (r) gh = { kind: "highlight-room", uid: r.uid, ok: canRemove(r.uid) };
+        }
+      } else if (b.tool === "edit") {
+        const r = scene.pickRoom(sx, sy)?.room;
+        if (r) gh = { kind: "highlight-room", uid: r.uid, ok: true };
+      }
     }
     scene.ghost = gh;
+  };
+
+  const canRemove = (roomUid: string) => {
+    const r = game.world.getRoom(roomUid);
+    if (!r || !game.world.canRemoveRoom(r)) return false;
+    return !game.chars.some((c) => game.world.roomOfPos(c.d.pos) === r);
   };
 
   const applyBuild = (sx: number, sy: number) => {
     const b = ui.build;
     const w = game.world;
-    const { tx, ty, edge } = hoverInfo(sx, sy);
-    if (b.tool === "wall" || b.tool === "door" || b.tool === "window") {
-      const cur = w.wall(edge.x, edge.y, edge.dir);
-      const kind = b.tool;
-      if (cur && cur.kind === kind) w.setWall(edge.x, edge.y, edge.dir, null);
-      else w.setWall(edge.x, edge.y, edge.dir, { kind, style: b.wallStyle });
+    if (b.tool === "room") {
+      const { gx, gy } = scene.cellAt(sx, sy);
+      const r = w.addRoom(b.room, gx, gy);
+      if (r) {
+        game.log("player", `盖了一间${r.name}`);
+        for (const c of game.chars) game.emit(c, `主人在家里新盖了一间${r.name}。`, 1);
+      }
     } else if (b.tool === "furniture") {
-      if (!w.addFurniture(b.furniture, tx, ty, b.rot)) return;
-    } else if (b.tool === "room") {
-      const p = ROOM_PRESETS.find((r) => r.id === b.room)!;
-      const name = stampPreset(w, p, tx, ty);
-      game.log("player", `盖了一间${name}`);
-      for (const c of game.chars) game.emit(c, `主人在家里新盖了一间${name}。`, 1);
+      const p = placeAt(sx, sy);
+      if (p) w.addFurniture(b.furniture, p.room.uid, p.x, p.z);
+    } else if (b.tool === "edit") {
+      const r = scene.pickRoom(sx, sy)?.room;
+      if (r) ui.openRoomEditor(r);
     } else if (b.tool === "erase") {
-      const f = w.furnitureAt(tx, ty);
+      const f = scene.pickFurniture(sx, sy);
       if (f) {
-        const user = game.occupantOf(f.uid);
-        if (user) user.stopCurrent();
+        game.occupantOf(f.uid)?.stopCurrent();
         w.removeFurniture(f.uid);
-      } else if (edge.d < 0.2 && w.wall(edge.x, edge.y, edge.dir)) w.setWall(edge.x, edge.y, edge.dir, null);
-      else if (!game.chars.some((c) => c.tile.x === tx && c.tile.y === ty)) w.setFloor(tx, ty, null);
+      } else {
+        const r = scene.pickRoom(sx, sy)?.room;
+        if (r && canRemove(r.uid)) {
+          w.removeRoom(r.uid);
+          game.log("player", `拆掉了${r.name}`);
+        }
+      }
     }
     game.changed();
   };
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  // 全景里双击房间：进入单间
+  canvas.addEventListener("dblclick", (e) => {
+    if (ui.build.on) return;
+    const p = local(e as unknown as PointerEvent);
+    const r = scene.pickRoom(p.x, p.y)?.room;
+    if (r) { scene.showRoom(r.uid); setView(); }
+  });
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     const p = local(e);
@@ -148,13 +178,16 @@ async function boot() {
       const [a, b] = [...pointers.values()];
       pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
       dragStart = null;
-      paintStart = null;
+      dragging = null;
       return;
     }
     dragStart = { ...p, moved: false, button: e.button };
-    if (ui.build.on && e.button === 0 && ui.build.tool === "floor") {
-      const { tx, ty } = hoverInfo(p.x, p.y);
-      paintStart = { x: tx, y: ty };
+    if (ui.build.on && ui.build.tool === "move" && e.button === 0) {
+      const f = scene.pickFurniture(p.x, p.y);
+      if (f) {
+        dragging = f.uid;
+        game.occupantOf(f.uid)?.stopCurrent();
+      }
     }
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -170,13 +203,9 @@ async function boot() {
       return;
     }
     if (prev) pointers.set(e.pointerId, p);
-    if (dragStart && prev) {
-      const far = Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > 6;
-      const panning = !ui.build.on || dragStart.button !== 0 || (ui.build.tool !== "floor");
-      if (far && panning) {
-        dragStart.moved = true;
-        scene.panBy(p.x - prev.x, p.y - prev.y);
-      }
+    if (dragStart && prev && !dragging && Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > 6) {
+      dragStart.moved = true;
+      scene.panBy(p.x - prev.x, p.y - prev.y);
     }
     updateGhost(p.x, p.y);
   });
@@ -186,16 +215,17 @@ async function boot() {
     if (pointers.size < 2) pinchDist = 0;
     const ds = dragStart;
     dragStart = null;
-    if (ui.build.on && paintStart && e.button === 0) {
-      const { tx, ty } = hoverInfo(p.x, p.y);
-      const x0 = Math.min(paintStart.x, tx), y0 = Math.min(paintStart.y, ty);
-      const x1 = Math.max(paintStart.x, tx), y1 = Math.max(paintStart.y, ty);
-      paintStart = null;
-      if ((x1 - x0 + 1) * (y1 - y0 + 1) <= 400) {
-        for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) game.world.setFloor(x, y, ui.build.floor, ui.build.roomName);
-        if (ui.build.autoWalls) autoWalls(game.world, x0, y0, x1 - x0 + 1, y1 - y0 + 1, ui.build.wallStyle);
+    if (dragging) {
+      const f = game.world.getFurniture(dragging);
+      const at = placeAt(p.x, p.y);
+      if (f && at && game.world.canPlaceFurniture(f.def, at.room.uid, at.x, at.z)) {
+        f.room = at.room.uid;
+        f.x = at.x;
+        f.z = at.z;
+        game.world.version++;
         game.changed();
       }
+      dragging = null;
       updateGhost(p.x, p.y);
       return;
     }
@@ -209,7 +239,7 @@ async function boot() {
     ui.select(c ? c.id : null);
   };
   canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); dragStart = null; paintStart = null; });
+  canvas.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); dragStart = null; dragging = null; });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const p = local(e);
@@ -217,8 +247,8 @@ async function boot() {
   }, { passive: false });
   window.addEventListener("keydown", (e) => {
     if ((e.target as HTMLElement).closest("input, textarea, select")) return;
-    if (e.key === "r" || e.key === "R") ui.build.rot = ui.build.rot ? 0 : 1;
-    if (e.key === "Escape") { if (ui.build.on) { ui.build.on = false; ui.renderBuild(); } else ui.select(null); }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { scene.stepRoom(e.key === "ArrowLeft" ? -1 : 1); setView(); }
+    if (e.key === "Escape") { if (ui.build.on) { ui.build.on = false; ui.renderBuild(); scene.ghost = null; } else ui.select(null); }
   });
 
   // 方便在浏览器控制台里调试

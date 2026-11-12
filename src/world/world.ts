@@ -1,9 +1,9 @@
-// 网格世界：地板、墙、家具、食物，以及寻路。世界没有边界，格子按需存在。
-import type { FoodItem, FurnitureInst, Tile, Wall, WorldData } from "../core/types";
-import { FURNITURE_BY_ID, type FurnitureDef, type InteractionDef } from "./catalog";
+// 娃娃屋式的房子：房间模块左右并排、往上叠楼层。负责房间/家具的增删、角色站位和寻路。
+import type { FoodItem, FurnitureInst, RoomInst, Vec3, WorldData } from "../core/types";
+import { FURNITURE_BY_ID, ROOM_TYPE_BY_ID, type FurnitureDef, type InteractionDef } from "./catalog";
 
-export const key = (x: number, y: number) => `${x},${y}`;
-export const wkey = (x: number, y: number, d: "N" | "W") => `${x},${y},${d}`;
+/** 角色在房间之间走动时走的那条「过道」的纵深 */
+export const WALKWAY_Z = 0.9;
 
 let uidCounter = 0;
 export function uid(prefix: string) {
@@ -11,217 +11,219 @@ export function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${uidCounter.toString(36)}`;
 }
 
-export function footprint(f: { def: string; rot: 0 | 1 }) {
-  const d = FURNITURE_BY_ID[f.def];
-  return f.rot === 0 ? { w: d.w, h: d.h } : { w: d.h, h: d.w };
+/** 立牌在世界里的位置：横向范围、底边纵深、高度 */
+export interface Standee {
+  x0: number; x1: number; // 世界横坐标
+  z: number;
+  h: number;
+  room: RoomInst;
 }
 
 export class World {
   data: WorldData;
-  /** 被家具挡住的格子 → 家具 uid */
-  private blocked = new Map<string, string>();
   version = 0; // 结构变化时递增，渲染层据此重建
 
   constructor(data: WorldData) {
     this.data = data;
-    this.rebuildIndex();
   }
 
-  rebuildIndex() {
-    this.blocked.clear();
-    for (const f of this.data.furniture) {
-      const def = FURNITURE_BY_ID[f.def];
-      if (!def || def.walkable || def.wallMounted) continue;
-      const { w, h } = footprint(f);
-      for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) this.blocked.set(key(f.x + dx, f.y + dy), f.uid);
-    }
-    this.version++;
+  // ———————————————————— 房间 ————————————————————
+
+  getRoom(id: string) {
+    return this.data.rooms.find((r) => r.uid === id);
   }
 
-  tile(x: number, y: number): Tile | undefined {
-    return this.data.tiles[key(x, y)];
+  roomByName(name: string) {
+    return this.data.rooms.find((r) => r.name === name);
   }
 
-  wall(x: number, y: number, d: "N" | "W"): Wall | undefined {
-    return this.data.walls[wkey(x, y, d)];
+  roomAt(x: number, y: number): RoomInst | undefined {
+    const fy = Math.round(y);
+    return this.data.rooms.find((r) => r.gy === fy && x >= r.gx && x < r.gx + r.w);
   }
 
-  furnitureAt(x: number, y: number): FurnitureInst | undefined {
-    const id = this.blocked.get(key(x, y));
-    if (id) return this.getFurniture(id);
-    // 可行走家具（地毯）
-    return this.data.furniture.find((f) => {
-      const { w, h } = footprint(f);
-      return x >= f.x && x < f.x + w && y >= f.y && y < f.y + h;
-    });
+  roomOfPos(p: Vec3) {
+    return this.roomAt(Math.min(p.x, Math.floor(p.x) + 0.999), p.y);
   }
 
-  getFurniture(uid: string) {
-    return this.data.furniture.find((f) => f.uid === uid);
+  roomName(p: Vec3) {
+    return this.roomOfPos(p)?.name ?? "外面";
   }
 
-  walkable(x: number, y: number) {
-    return !!this.tile(x, y) && !this.blocked.has(key(x, y));
+  rooms(): string[] {
+    return this.data.rooms.map((r) => r.name);
   }
 
-  /** 两个相邻格子之间能否通过（检查墙和门） */
-  passable(ax: number, ay: number, bx: number, by: number) {
-    let w: Wall | undefined;
-    if (bx === ax + 1 && by === ay) w = this.wall(bx, by, "W");
-    else if (bx === ax - 1 && by === ay) w = this.wall(ax, ay, "W");
-    else if (by === ay + 1 && bx === ax) w = this.wall(bx, by, "N");
-    else if (by === ay - 1 && bx === ax) w = this.wall(ax, ay, "N");
-    return !w || w.kind === "door";
+  cellFree(gx: number, gy: number, ignore?: string) {
+    return !this.data.rooms.some((r) => r.uid !== ignore && r.gy === gy && gx >= r.gx && gx < r.gx + r.w);
   }
 
-  /** A* 寻路，4 方向。返回包含终点、不含起点的格子列表；找不到返回 null。 */
-  findPath(sx: number, sy: number, tx: number, ty: number, allowEndBlocked = false, limit = 4000): { x: number; y: number }[] | null {
-    if (sx === tx && sy === ty) return [];
-    if (!allowEndBlocked && !this.walkable(tx, ty)) return null;
-    const open: { x: number; y: number; g: number; f: number }[] = [{ x: sx, y: sy, g: 0, f: 0 }];
-    const came = new Map<string, string>();
-    const gScore = new Map<string, number>([[key(sx, sy), 0]]);
-    let steps = 0;
-    while (open.length && steps++ < limit) {
-      let bi = 0;
-      for (let i = 1; i < open.length; i++) if (open[i].f < open[bi].f) bi = i;
-      const cur = open.splice(bi, 1)[0];
-      if (cur.x === tx && cur.y === ty) {
-        const path: { x: number; y: number }[] = [];
-        let k = key(tx, ty);
-        while (k !== key(sx, sy)) {
-          const [x, y] = k.split(",").map(Number);
-          path.unshift({ x, y });
-          k = came.get(k)!;
-        }
-        return path;
-      }
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = cur.x + dx, ny = cur.y + dy;
-        const isEnd = nx === tx && ny === ty;
-        if (!(this.walkable(nx, ny) || (isEnd && allowEndBlocked && this.tile(nx, ny)))) continue;
-        if (!this.passable(cur.x, cur.y, nx, ny)) continue;
-        const g = cur.g + 1;
-        const nk = key(nx, ny);
-        if (g >= (gScore.get(nk) ?? Infinity)) continue;
-        gScore.set(nk, g);
-        came.set(nk, key(cur.x, cur.y));
-        open.push({ x: nx, y: ny, g, f: g + Math.abs(tx - nx) + Math.abs(ty - ny) });
-      }
-    }
-    return null;
-  }
-
-  /** 家具周围可以站人的格子（不隔墙） */
-  accessSpots(f: FurnitureInst) {
-    const { w, h } = footprint(f);
-    const spots: { x: number; y: number }[] = [];
-    for (let dx = 0; dx < w; dx++) {
-      for (let dy = 0; dy < h; dy++) {
-        const cx = f.x + dx, cy = f.y + dy;
-        for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = cx + ox, ny = cy + oy;
-          if (nx >= f.x && nx < f.x + w && ny >= f.y && ny < f.y + h) continue;
-          if (!this.walkable(nx, ny) || !this.passable(cx, cy, nx, ny)) continue;
-          if (!spots.some((s) => s.x === nx && s.y === ny)) spots.push({ x: nx, y: ny });
-        }
-      }
-    }
-    return spots;
-  }
-
-  /** 家具的中心点（格子坐标，可为小数），角色躺/坐上去时用 */
-  centerOf(f: FurnitureInst) {
-    const { w, h } = footprint(f);
-    return { x: f.x + w / 2, y: f.y + h / 2 };
-  }
-
-  canPlace(defId: string, x: number, y: number, rot: 0 | 1, ignoreUid?: string) {
-    const def = FURNITURE_BY_ID[defId];
-    const { w, h } = rot === 0 ? { w: def.w, h: def.h } : { w: def.h, h: def.w };
-    for (let dx = 0; dx < w; dx++) {
-      for (let dy = 0; dy < h; dy++) {
-        const tx = x + dx, ty = y + dy;
-        if (!this.tile(tx, ty)) return false;
-        const other = this.furnitureAt(tx, ty);
-        if (other && other.uid !== ignoreUid) {
-          const od = FURNITURE_BY_ID[other.def];
-          // 地毯上可以放家具，家具上不能放地毯以外的东西
-          if (!(od.walkable && !def.walkable)) return false;
-        }
-        // 多格家具内部不能被墙隔开
-        if (dx > 0 && this.wall(tx, ty, "W")) return false;
-        if (dy > 0 && this.wall(tx, ty, "N")) return false;
-      }
+  /** 能不能在这里盖房间：格子要空着，二楼以上下面要有房间撑着 */
+  canPlaceRoom(gx: number, gy: number, w: number) {
+    if (gy < 0) return false;
+    for (let i = 0; i < w; i++) {
+      if (!this.cellFree(gx + i, gy)) return false;
+      if (gy > 0 && this.cellFree(gx + i, gy - 1)) return false;
     }
     return true;
   }
 
-  addFurniture(defId: string, x: number, y: number, rot: 0 | 1 = 0): FurnitureInst | null {
-    if (!this.canPlace(defId, x, y, rot)) return null;
-    const f: FurnitureInst = { uid: uid("f"), def: defId, x, y, rot };
+  addRoom(typeId: string, gx: number, gy: number, name?: string, w?: number): RoomInst | null {
+    const t = ROOM_TYPE_BY_ID[typeId];
+    if (!t) return null;
+    const width = w ?? t.w;
+    if (!this.canPlaceRoom(gx, gy, width)) return null;
+    let nm = name ?? t.name;
+    if (!name && this.rooms().includes(nm)) {
+      let i = 2;
+      while (this.rooms().includes(`${t.name}${i}`)) i++;
+      nm = `${t.name}${i}`;
+    }
+    const room: RoomInst = { uid: uid("r"), type: typeId, name: nm, gx, gy, w: width, wall: t.wall, floor: t.floor };
+    this.data.rooms.push(room);
+    for (const f of t.furniture) this.addFurniture(f.def, room.uid, f.x * width, f.z);
+    this.version++;
+    return room;
+  }
+
+  /** 拆房间：上面还有房间时不能拆 */
+  canRemoveRoom(r: RoomInst) {
+    for (let i = 0; i < r.w; i++) if (!this.cellFree(r.gx + i, r.gy + 1)) return false;
+    return true;
+  }
+
+  removeRoom(id: string) {
+    const r = this.getRoom(id);
+    if (!r || !this.canRemoveRoom(r)) return false;
+    for (const f of this.data.furniture.filter((f) => f.room === id)) this.removeFurniture(f.uid);
+    this.data.rooms = this.data.rooms.filter((x) => x.uid !== id);
+    this.version++;
+    return true;
+  }
+
+  // ———————————————————— 家具 ————————————————————
+
+  getFurniture(id: string) {
+    return this.data.furniture.find((f) => f.uid === id);
+  }
+
+  standeeOf(f: FurnitureInst): Standee | null {
+    const def = FURNITURE_BY_ID[f.def];
+    const room = this.getRoom(f.room);
+    if (!def || !room) return null;
+    const cx = room.gx + f.x;
+    return { x0: cx - def.w / 2, x1: cx + def.w / 2, z: f.z, h: def.h, room };
+  }
+
+  /** 立牌可以自由摆放，只要在房间范围内 */
+  canPlaceFurniture(defId: string, roomId: string, x: number, z: number) {
+    const def = FURNITURE_BY_ID[defId];
+    const room = this.getRoom(roomId);
+    if (!def || !room) return false;
+    return x - def.w / 2 >= 0.02 && x + def.w / 2 <= room.w - 0.02 && z >= 0.02 && z <= 0.95;
+  }
+
+  addFurniture(defId: string, roomId: string, x: number, z: number): FurnitureInst | null {
+    if (!this.canPlaceFurniture(defId, roomId, x, z)) return null;
+    const f: FurnitureInst = { uid: uid("f"), def: defId, room: roomId, x, z };
     this.data.furniture.push(f);
-    this.rebuildIndex();
+    this.version++;
     return f;
   }
 
-  removeFurniture(uidStr: string) {
-    this.data.furniture = this.data.furniture.filter((f) => f.uid !== uidStr);
-    this.data.foods = this.data.foods.filter((fd) => fd.furniture !== uidStr);
-    this.rebuildIndex();
-  }
-
-  setFloor(x: number, y: number, floor: string | null, room?: string) {
-    const k = key(x, y);
-    if (floor === null) {
-      delete this.data.tiles[k];
-      // 删除地板时，连同上面的家具一起删
-      const f = this.furnitureAt(x, y);
-      if (f) this.removeFurniture(f.uid);
-    } else {
-      this.data.tiles[k] = { floor, room: room ?? this.data.tiles[k]?.room };
-    }
+  removeFurniture(id: string) {
+    this.data.furniture = this.data.furniture.filter((f) => f.uid !== id);
+    this.data.foods = this.data.foods.filter((fd) => fd.furniture !== id);
     this.version++;
-  }
-
-  setWall(x: number, y: number, d: "N" | "W", wall: Wall | null) {
-    const k = wkey(x, y, d);
-    if (wall) this.data.walls[k] = wall;
-    else delete this.data.walls[k];
-    this.version++;
-  }
-
-  roomOf(x: number, y: number) {
-    return this.tile(Math.floor(x), Math.floor(y))?.room ?? "空地";
-  }
-
-  rooms(): string[] {
-    const s = new Set<string>();
-    for (const t of Object.values(this.data.tiles)) if (t.room) s.add(t.room);
-    return [...s];
-  }
-
-  /** 房间里一个随机的可行走格子 */
-  randomTileIn(room?: string) {
-    const all = Object.entries(this.data.tiles)
-      .filter(([, t]) => !room || t.room === room)
-      .map(([k]) => k.split(",").map(Number) as [number, number])
-      .filter(([x, y]) => this.walkable(x, y));
-    if (!all.length) return null;
-    const [x, y] = all[Math.floor(Math.random() * all.length)];
-    return { x, y };
   }
 
   foodsOn(furnitureUid: string): FoodItem[] {
     return this.data.foods.filter((f) => f.furniture === furnitureUid);
   }
 
-  /** 生成给 AI 看的家具清单 */
+  /** 家具在世界里的大致位置（用来比远近） */
+  posOf(f: FurnitureInst): Vec3 {
+    const room = this.getRoom(f.room);
+    return room ? { x: room.gx + f.x, y: room.gy, z: f.z } : { x: 0, y: 0, z: 0.5 };
+  }
+
+  /** 使用家具时角色站的位置 */
+  spotFor(f: FurnitureInst, it?: InteractionDef): Vec3 | null {
+    const room = this.getRoom(f.room);
+    if (!room) return null;
+    const x = room.gx + f.x;
+    const def = FURNITURE_BY_ID[f.def];
+    if (it?.onTop) {
+      // 坐上去：站在立牌稍后一点，下半身被立牌挡住，看起来就是坐着；躺下时角色隐藏
+      return { x, y: room.gy, z: Math.max(0.01, f.z - (it.pose === "lie" ? def.d / 2 : 0.025)) };
+    }
+    // 摆在房间中间的家具（餐桌、电脑桌）：站到后面，面朝镜头；靠墙的家具：站到前面
+    if (f.z > 0.3) return { x, y: room.gy, z: Math.max(0.03, f.z - def.d - 0.03) };
+    return { x, y: room.gy, z: Math.min(0.95, f.z + 0.12) };
+  }
+
+  randomSpotIn(roomName?: string): Vec3 | null {
+    const list = roomName ? this.data.rooms.filter((r) => r.name === roomName) : this.data.rooms.filter((r) => !ROOM_TYPE_BY_ID[r.type]?.stairs);
+    if (!list.length) return null;
+    const r = list[Math.floor(Math.random() * list.length)];
+    return { x: r.gx + 0.15 + Math.random() * (r.w - 0.3), y: r.gy, z: 0.55 + Math.random() * 0.35 };
+  }
+
+  // ———————————————————— 寻路 ————————————————————
+
+  private neighbors(r: RoomInst): RoomInst[] {
+    const out: RoomInst[] = [];
+    const t = ROOM_TYPE_BY_ID[r.type];
+    for (const o of this.data.rooms) {
+      if (o === r) continue;
+      if (o.gy === r.gy && (o.gx === r.gx + r.w || o.gx + o.w === r.gx)) out.push(o);
+      if (t?.stairs && ROOM_TYPE_BY_ID[o.type]?.stairs && o.gx === r.gx && Math.abs(o.gy - r.gy) === 1) out.push(o);
+    }
+    return out;
+  }
+
+  /** 从 from 走到 to 的路点（不含起点）。房间之间不连通时返回 null。 */
+  findPath(from: Vec3, to: Vec3): Vec3[] | null {
+    const a = this.roomOfPos(from), b = this.roomOfPos(to);
+    if (!a || !b) return null;
+    if (a === b) return [to];
+    const prev = new Map<RoomInst, RoomInst>();
+    const queue = [a];
+    const seen = new Set([a]);
+    while (queue.length) {
+      const r = queue.shift()!;
+      if (r === b) break;
+      for (const n of this.neighbors(r)) {
+        if (seen.has(n)) continue;
+        seen.add(n);
+        prev.set(n, r);
+        queue.push(n);
+      }
+    }
+    if (!seen.has(b)) return null;
+    const chain: RoomInst[] = [b];
+    while (chain[0] !== a) chain.unshift(prev.get(chain[0])!);
+    const pts: Vec3[] = [{ x: from.x, y: a.gy, z: WALKWAY_Z }];
+    for (let i = 0; i < chain.length - 1; i++) {
+      const r = chain[i], n = chain[i + 1];
+      if (n.gy === r.gy) {
+        const edge = n.gx > r.gx ? n.gx : r.gx;
+        pts.push({ x: edge, y: r.gy, z: WALKWAY_Z });
+      } else {
+        const sx = r.gx + r.w / 2;
+        pts.push({ x: sx, y: r.gy, z: 0.4 }, { x: sx, y: n.gy, z: 0.4 });
+      }
+    }
+    pts.push({ x: to.x, y: b.gy, z: WALKWAY_Z }, to);
+    return pts;
+  }
+
+  /** 给 AI 看的家具清单 */
   describeFurniture(): { uid: string; name: string; room: string; interactions: InteractionDef[]; def: FurnitureDef; inst: FurnitureInst }[] {
     return this.data.furniture
       .map((inst) => {
         const def = FURNITURE_BY_ID[inst.def];
-        return { uid: inst.uid, name: def.name, room: this.roomOf(inst.x, inst.y), interactions: def.interactions, def, inst };
+        return { uid: inst.uid, name: def.name, room: this.getRoom(inst.room)?.name ?? "?", interactions: def.interactions, def, inst };
       })
       .filter((x) => x.interactions.length > 0);
   }

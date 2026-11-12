@@ -1,41 +1,42 @@
 // 全局共享的数据结构。存档就是这些结构的 JSON。
 
-export type Dir = "N" | "W"; // 墙只记录格子的北边和西边，南/东边等于相邻格子的北/西边
+// 房子由「房间模块」拼成：每个房间占一层楼里的一格或几格，像娃娃屋一样左右并排、往上叠。
+// 坐标约定：x 是横向位置（以格为单位，可为小数），y 是楼层（0 = 一楼），z 是房间里的纵深（0 = 贴着后墙，1 = 最靠近镜头）。
 
-export interface Tile {
-  floor: string; // 地板材质 id
-  room?: string; // 所属房间名，例如「卧室」
-}
-
-export interface Wall {
-  kind: "wall" | "window" | "door";
-  style: string;
+export interface RoomInst {
+  uid: string;
+  type: string;      // 房间类型 id
+  name: string;      // 给玩家和 AI 看的名字，例如「卧室A」
+  gx: number;        // 最左边那一格的位置
+  gy: number;        // 楼层
+  w: number;         // 占几格宽
+  wall: string;      // 墙纸
+  floor: string;     // 地板
 }
 
 export interface FurnitureInst {
   uid: string;
-  def: string; // 家具定义 id
-  x: number;
-  y: number;
-  rot: 0 | 1; // 0 = 朝右下，1 = 朝左下（镜像）
+  def: string;   // 家具定义 id
+  room: string;  // 所在房间 uid
+  x: number;     // 房间内的横向中心（相对房间左边，以格为单位）
+  z: number;     // 立牌底边所在的纵深（0 = 贴着后墙，1 = 最靠近镜头）
   state?: Record<string, string | number | boolean>;
 }
 
 export interface FoodItem {
   uid: string;
-  kind: string; // 食物 id
+  kind: string;       // 食物 id
   furniture?: string; // 放在哪件家具上
-  x: number;
-  y: number;
-  forChar?: string; // 主人指定给谁
+  forChar?: string;   // 主人指定给谁
 }
 
 export interface WorldData {
-  tiles: Record<string, Tile>; // key = "x,y"
-  walls: Record<string, Wall>; // key = "x,y,N" 或 "x,y,W"
+  rooms: RoomInst[];
   furniture: FurnitureInst[];
   foods: FoodItem[];
 }
+
+export interface Vec3 { x: number; y: number; z: number }
 
 export type Emotion =
   | "normal" | "happy" | "sad" | "angry" | "surprised" | "shy" | "sick" | "sleepy";
@@ -116,7 +117,7 @@ export interface CharacterData {
   relations: Record<string, Relation>; // key 为角色 id，"player" 为主人
   chat: ChatMsg[]; // 与主人的聊天记录
   // 运行时状态（也会存档，方便恢复）
-  pos: { x: number; y: number }; // 格子坐标，可以是小数
+  pos: Vec3;
   facing: 1 | -1;
   emotion: Emotion;
   thought: string;
@@ -152,7 +153,6 @@ export interface Settings {
   ai: AISettings;
   news: NewsSettings;
   timeScale: number; // 调试用：需求变化和动作时长的倍率
-  wallMode: "cutaway" | "full";
 }
 
 export interface LogEntry {

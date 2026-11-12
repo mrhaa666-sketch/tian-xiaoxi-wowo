@@ -5,8 +5,8 @@ import { describeNow, hhmm } from "../core/time";
 import type { Character } from "../sim/character";
 import { PERSONA_TEMPLATE, SCHEDULE_TEMPLATE, defaultSettings, newCharacter, randomAppearance } from "../sim/defaults";
 import { Game } from "../sim/game";
-import { FLOORS, FOODS, FURNITURE, WALL_STYLES } from "../world/catalog";
-import { ROOM_PRESETS } from "../world/presets";
+import type { RoomInst } from "../core/types";
+import { FLOORS, FOODS, FURNITURE, ROOM_TYPES, WALL_STYLES } from "../world/catalog";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -14,18 +14,13 @@ const NEED_COLORS: Record<keyof Needs, string> = {
   hunger: "#e9876b", energy: "#5b8def", mood: "#e6b422", hygiene: "#4fb3bf", social: "#b07cc6", health: "#4fae74",
 };
 
-export type BuildTool = "floor" | "wall" | "door" | "window" | "furniture" | "room" | "erase";
+export type BuildTool = "room" | "furniture" | "move" | "edit" | "erase";
 
 export interface BuildState {
   on: boolean;
   tool: BuildTool;
-  floor: string;
-  wallStyle: string;
   furniture: string;
   room: string;
-  roomName: string;
-  rot: 0 | 1;
-  autoWalls: boolean;
 }
 
 export class UI {
@@ -33,11 +28,14 @@ export class UI {
   stage: HTMLElement;
   selected: string | null = null;
   tab: "status" | "chat" | "relations" | "memory" = "status";
-  build: BuildState = { on: false, tool: "floor", floor: "wood", wallStyle: "cream", furniture: "bed", room: "bedroom", roomName: "新房间", rot: 0, autoWalls: true };
+  build: BuildState = { on: false, tool: "furniture", furniture: "plant", room: "bedroom" };
   logCollapsed = false;
   private typing = new Set<string>();
   private els: Record<string, HTMLElement> = {};
   onSelect?: (id: string | null) => void;
+  /** 视角切换：all = 全景，room = 某个房间，prev/next = 前后切换 */
+  onView?: (v: { mode: "all" } | { mode: "room"; uid: string } | { mode: "step"; dir: 1 | -1 }) => void;
+  view: { mode: "all" } | { mode: "room"; uid: string } = { mode: "all" };
   onSettingsChanged?: () => void;
 
   constructor(host: HTMLElement, private game: Game, private brain: Brain) {
@@ -49,7 +47,12 @@ export class UI {
         <div class="clock panel" id="clock"></div>
         <span class="chip" id="aistatus" role="button" tabindex="0" title="打开设置"></span>
         <div class="spacer"></div>
-        <button class="btn" id="btn-walls" title="切换墙的显示方式"></button>
+        <div class="viewbar panel" id="viewbar">
+          <button class="btn small" id="v-all">全景</button>
+          <button class="btn small" id="v-prev" aria-label="上一个房间">◀</button>
+          <select class="btn small" id="v-room" aria-label="选择房间"></select>
+          <button class="btn small" id="v-next" aria-label="下一个房间">▶</button>
+        </div>
         <button class="btn" id="btn-build">建造</button>
         <button class="btn" id="btn-settings">设置</button>
       </div>
@@ -59,22 +62,37 @@ export class UI {
       <div class="buildbar panel" id="buildbar" hidden></div>
       <div id="toast-host"></div>
       <div id="modal-host"></div>`;
-    for (const id of ["stage", "clock", "aistatus", "roster", "detail", "logbox", "buildbar", "toast-host", "modal-host", "btn-walls", "btn-build", "btn-settings"]) {
+    for (const id of ["stage", "clock", "aistatus", "roster", "detail", "logbox", "buildbar", "toast-host", "modal-host", "viewbar", "btn-build", "btn-settings"]) {
       this.els[id] = host.querySelector("#" + id)! as HTMLElement;
     }
     this.stage = this.els.stage;
     this.els["btn-build"].onclick = () => { this.build.on = !this.build.on; this.renderBuild(); };
     this.els["btn-settings"].onclick = () => this.openSettings();
     this.els.aistatus.onclick = () => this.openSettings();
-    this.els["btn-walls"].onclick = () => {
-      game.settings.wallMode = game.settings.wallMode === "cutaway" ? "full" : "cutaway";
-      this.renderTop();
-    };
     game.onPlayerMessage((c, text) => this.toast(c, text));
+    const vb = this.els.viewbar;
+    vb.querySelector<HTMLElement>("#v-all")!.onclick = () => this.onView?.({ mode: "all" });
+    vb.querySelector<HTMLElement>("#v-prev")!.onclick = () => this.onView?.({ mode: "step", dir: -1 });
+    vb.querySelector<HTMLElement>("#v-next")!.onclick = () => this.onView?.({ mode: "step", dir: 1 });
+    const sel = vb.querySelector<HTMLSelectElement>("#v-room")!;
+    sel.onchange = () => (sel.value ? this.onView?.({ mode: "room", uid: sel.value }) : this.onView?.({ mode: "all" }));
     this.renderAll();
   }
 
+  /** 视角条：全景时显示「全景」高亮，单间时显示当前房间 */
+  renderView() {
+    const vb = this.els.viewbar;
+    vb.querySelector("#v-all")!.className = "btn small" + (this.view.mode === "all" ? " active" : "");
+    const sel = vb.querySelector<HTMLSelectElement>("#v-room")!;
+    const rooms = [...this.game.world.data.rooms].sort((a, b) => b.gy - a.gy || a.gx - b.gx);
+    const cur = this.view.mode === "room" ? this.view.uid : "";
+    const html = `<option value="">看单个房间…</option>` + rooms.map((r) => `<option value="${r.uid}" ${r.uid === cur ? "selected" : ""}>${r.gy + 1}楼 · ${esc(r.name)}</option>`).join("");
+    if (sel.innerHTML !== html) sel.innerHTML = html;
+    sel.value = cur;
+  }
+
   renderAll() {
+    this.renderView();
     this.renderTop();
     this.renderRoster();
     this.renderDetail();
@@ -92,7 +110,6 @@ export class UI {
     const st = this.els.aistatus;
     st.className = "chip " + (s.mode === "mock" ? "mock" : s.mode === "error" ? "error" : "");
     st.textContent = s.mode === "online" ? `AI 在线 · ${s.callsLastMinute}/${this.game.settings.ai.maxCallsPerMinute} 次/分${s.thinking ? " · 思考中" : ""}` : s.message;
-    this.els["btn-walls"].textContent = this.game.settings.wallMode === "cutaway" ? "墙：矮" : "墙：高";
   }
 
   // ———————————————————— 角色列表 ————————————————————
@@ -259,41 +276,60 @@ export class UI {
     this.els.logbox.hidden = this.build.on;
     if (!this.build.on) return;
     const b = this.build;
-    const tools: [BuildTool, string][] = [["room", "预设房间"], ["floor", "地板"], ["wall", "墙"], ["door", "门"], ["window", "窗"], ["furniture", "家具"], ["erase", "拆除"]];
+    const tools: [BuildTool, string][] = [["room", "加房间"], ["furniture", "摆家具"], ["move", "移动家具"], ["edit", "房间设置"], ["erase", "拆除"]];
     let opts = "";
     let hint = "";
-    if (b.tool === "floor") {
-      opts = FLOORS.map((f) => `<button class="btn small ${b.floor === f.id ? "active" : ""}" data-floor="${f.id}"><span class="swatch" style="background:#${f.color.toString(16).padStart(6, "0")}"></span> ${f.name}</button>`).join("")
-        + ` <input class="btn small" id="room-name" value="${esc(b.roomName)}" style="width:110px" title="这片地板属于哪个房间" />
-        <label class="hint"><input type="checkbox" id="auto-walls" ${b.autoWalls ? "checked" : ""}/> 自动围墙</label>`;
-      hint = "按住拖动可以一次铺一片。房间名会告诉角色这是哪里。";
-    } else if (b.tool === "wall" || b.tool === "door" || b.tool === "window") {
-      opts = WALL_STYLES.map((w) => `<button class="btn small ${b.wallStyle === w.id ? "active" : ""}" data-wall="${w.id}"><span class="swatch" style="background:#${w.color.toString(16).padStart(6, "0")}"></span> ${w.name}</button>`).join("");
-      hint = "点格子的边。再点一次已有的墙可以拆掉。";
+    if (b.tool === "room") {
+      opts = ROOM_TYPES.map((t) => `<button class="btn small ${b.room === t.id ? "active" : ""}" data-room="${t.id}">${t.name}${t.w > 1 ? `（${t.w}格宽）` : ""}</button>`).join("");
+      hint = "点一个空位放下房间。二楼以上下面要有房间撑着；上下楼要靠上下对齐的楼梯间。";
     } else if (b.tool === "furniture") {
-      opts = FURNITURE.map((f) => `<button class="btn small ${b.furniture === f.id ? "active" : ""}" data-furn="${f.id}" title="${f.category}">${f.name}</button>`).join("");
-      hint = "点地板放置，按 R 或点「旋转」改朝向。";
-      opts += ` <button class="btn small" id="rot">旋转</button>`;
-    } else if (b.tool === "room") {
-      opts = ROOM_PRESETS.map((p) => `<button class="btn small ${b.room === p.id ? "active" : ""}" data-room="${p.id}">${p.name}（${p.w}×${p.h}）</button>`).join("");
-      hint = "点一下放下整间房，会覆盖那片区域原有的地板和家具。";
+      const cats = [...new Set(FURNITURE.map((f) => f.category))];
+      opts = cats.map((c) => `<span class="hint">${c}</span>` + FURNITURE.filter((f) => f.category === c).map((f) => `<button class="btn small ${b.furniture === f.id ? "active" : ""}" data-furn="${f.id}">${f.name}</button>`).join("")).join(" ");
+      hint = "在房间里点一下放下立牌。点得越靠下，摆得越靠前。";
+    } else if (b.tool === "move") {
+      hint = "按住家具拖到新位置，可以拖到别的房间。";
+    } else if (b.tool === "edit") {
+      hint = "点一个房间，修改名字、墙纸和地板。";
     } else {
-      hint = "点家具、墙或地板把它拆掉（先拆家具，再拆墙，最后拆地板）。";
+      hint = "点家具把它拆掉；点房间的空白处拆掉整个房间（上面有房间、或者里面有人时不能拆）。";
     }
     el.innerHTML = `<div class="row">${tools.map(([k, n]) => `<button class="btn ${b.tool === k ? "active" : ""}" data-tool="${k}">${n}</button>`).join("")}<span class="spacer"></span><button class="btn small" id="build-done">完成</button></div>
-      <div class="row">${opts}</div><div class="hint">${hint} 右键或两指拖动画面。</div>`;
+      ${opts ? `<div class="row">${opts}</div>` : ""}<div class="hint">${hint} 右键或两指拖动画面，滚轮缩放。</div>`;
     el.querySelectorAll<HTMLElement>("[data-tool]").forEach((x) => (x.onclick = () => { b.tool = x.dataset.tool as BuildTool; this.renderBuild(); }));
-    el.querySelectorAll<HTMLElement>("[data-floor]").forEach((x) => (x.onclick = () => { b.floor = x.dataset.floor!; this.renderBuild(); }));
-    el.querySelectorAll<HTMLElement>("[data-wall]").forEach((x) => (x.onclick = () => { b.wallStyle = x.dataset.wall!; this.renderBuild(); }));
     el.querySelectorAll<HTMLElement>("[data-furn]").forEach((x) => (x.onclick = () => { b.furniture = x.dataset.furn!; this.renderBuild(); }));
     el.querySelectorAll<HTMLElement>("[data-room]").forEach((x) => (x.onclick = () => { b.room = x.dataset.room!; this.renderBuild(); }));
     el.querySelector<HTMLElement>("#build-done")!.onclick = () => { b.on = false; this.renderBuild(); };
-    const rot = el.querySelector<HTMLElement>("#rot");
-    if (rot) rot.onclick = () => { b.rot = b.rot ? 0 : 1; };
-    const rn = el.querySelector<HTMLInputElement>("#room-name");
-    if (rn) rn.oninput = () => (b.roomName = rn.value.trim() || "新房间");
-    const aw = el.querySelector<HTMLInputElement>("#auto-walls");
-    if (aw) aw.onchange = () => (b.autoWalls = aw.checked);
+  }
+
+  openRoomEditor(room: RoomInst) {
+    const m = this.modal(`
+      <h3>房间设置</h3>
+      <div class="field"><label for="r-name">名字</label><input id="r-name" value="${esc(room.name)}" maxlength="12" />
+        <div class="help">角色和 AI 用这个名字称呼房间。</div></div>
+      <div class="field"><label>墙纸</label><div class="row" style="display:flex;gap:6px;flex-wrap:wrap">${WALL_STYLES.map((w) => `<button class="btn small ${room.wall === w.id ? "active" : ""}" data-wall="${w.id}"><span class="swatch" style="background:#${w.color.toString(16).padStart(6, "0")}"></span> ${w.name}</button>`).join("")}</div></div>
+      <div class="field"><label>地板</label><div class="row" style="display:flex;gap:6px;flex-wrap:wrap">${FLOORS.map((f) => `<button class="btn small ${room.floor === f.id ? "active" : ""}" data-floor="${f.id}"><span class="swatch" style="background:#${f.color.toString(16).padStart(6, "0")}"></span> ${f.name}</button>`).join("")}</div></div>
+      <footer><button class="btn" id="r-cancel">取消</button><button class="btn primary" id="r-save">保存</button></footer>`);
+    let wall = room.wall, floor = room.floor;
+    const pick = (attr: string, set: (v: string) => void) => m.el.querySelectorAll<HTMLElement>(`[data-${attr}]`).forEach((b) => (b.onclick = () => {
+      set(b.dataset[attr]!);
+      m.el.querySelectorAll(`[data-${attr}]`).forEach((x) => x.classList.toggle("active", x === b));
+    }));
+    pick("wall", (v) => (wall = v));
+    pick("floor", (v) => (floor = v));
+    m.el.querySelector<HTMLElement>("#r-cancel")!.onclick = m.close;
+    m.el.querySelector<HTMLElement>("#r-save")!.onclick = () => {
+      const name = (m.el.querySelector("#r-name") as HTMLInputElement).value.trim();
+      if (name && name !== room.name) {
+        if (this.game.world.rooms().includes(name)) { (m.el.querySelector("#r-name") as HTMLInputElement).focus(); return; }
+        this.game.log("player", `把${room.name}改名为${name}`);
+        room.name = name;
+      }
+      room.wall = wall;
+      room.floor = floor;
+      this.game.world.version++;
+      this.game.changed();
+      m.close();
+    };
   }
 
   // ———————————————————— 弹窗 ————————————————————
@@ -346,8 +382,7 @@ export class UI {
         this.game.log("player", `修改了${name}的人设`);
         this.game.emit(c, "主人更新了你的人设或作息，之后按新的来。", 1);
       } else {
-        const t = this.game.world.randomTileIn() ?? { x: 2, y: 2 };
-        d.pos = { x: t.x + 0.5, y: t.y + 0.5 };
+        d.pos = this.game.world.randomSpotIn() ?? { x: 1.5, y: 0, z: 0.7 };
         const nc = this.game.addCharacter(d);
         this.select(nc.id);
       }

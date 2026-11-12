@@ -1,20 +1,20 @@
 // 角色的运行时：需求变化、生病、执行计划（走路、用家具、说话）。
 // AI 只决定「接下来做什么」，具体怎么走、怎么用家具由这里负责。
-import type { CharacterData, Emotion, FurnitureInst, Needs, PlanStep, Pose } from "../core/types";
+import type { CharacterData, Emotion, FurnitureInst, Needs, PlanStep, Pose, Vec3 } from "../core/types";
 import { FOOD_BY_ID, FURNITURE_BY_ID, type InteractionDef } from "../world/catalog";
 import type { Game } from "./game";
 
-const SPEED = 2.4; // 格/秒
+const SPEED = 0.9; // 格/秒
 
 interface Running {
   step: PlanStep;
   phase: "path" | "act";
-  path: { x: number; y: number }[];
+  path: Vec3[];
   furniture?: FurnitureInst;
   interaction?: InteractionDef;
   endsAt: number; // performance.now() 毫秒
   started: boolean;
-  returnTo?: { x: number; y: number }; // 躺/坐到家具上之后，结束时回到的格子
+  returnTo?: Vec3; // 坐/躺到家具上之后，结束时回到的位置
 }
 
 export const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
@@ -25,7 +25,7 @@ export class Character {
   run: Running | null = null;
   pose: Pose = "stand";
   moving = false;
-  back = false; // 朝向屏幕里面（往上走）
+  hidden = false; // 躺在床上、泡在浴缸里时，角色本身不画，由家具画出「有人」
   speech: { text: string; until: number } | null = null;
   emote: { icon: string; until: number } | null = null;
   usingFurniture: string | null = null;
@@ -39,8 +39,7 @@ export class Character {
 
   get id() { return this.d.id; }
   get name() { return this.d.name; }
-  get tile() { return { x: Math.floor(this.d.pos.x), y: Math.floor(this.d.pos.y) }; }
-  get room() { return this.game.world.roomOf(this.d.pos.x, this.d.pos.y); }
+  get room() { return this.game.world.roomName(this.d.pos); }
   get idle() { return !this.run && this.queue.length === 0; }
 
   setEmotion(e: Emotion | undefined) {
@@ -56,7 +55,7 @@ export class Character {
     this.emote = { icon, until: performance.now() + seconds * 1000 };
   }
 
-  /** 用新计划替换当前计划。正在做的事会被打断。 */
+  /** 用新计划替换当前计划。interrupt 为 true 时，正在做的事会被打断。 */
   setPlan(steps: PlanStep[], interrupt = true) {
     if (interrupt) this.stopCurrent();
     this.queue = steps.slice();
@@ -145,12 +144,14 @@ export class Character {
 
   // ———————————————————— 执行计划 ————————————————————
 
+  private pathTo(p: Vec3 | null) {
+    return p ? this.game.world.findPath(this.d.pos, p) : null;
+  }
+
   private startStep(step: PlanStep) {
     const w = this.game.world;
     const run: Running = { step, phase: "path", path: [], endsAt: 0, started: false };
     if (step.emotion) this.setEmotion(step.emotion);
-
-    const pathTo = (tx: number, ty: number) => w.findPath(this.tile.x, this.tile.y, tx, ty);
 
     switch (step.do) {
       case "use":
@@ -163,11 +164,13 @@ export class Character {
             this.game.emit(this, "你想吃饭，但家里没有做好的饭菜。可以去冰箱拿零食，或者去灶台做饭。", 1);
             return;
           }
-          run.interaction = FURNITURE_BY_ID[f.def].interactions.find((i) => i.tags?.includes("eat")) ?? FURNITURE_BY_ID[f.def].interactions[0];
+          const defs = FURNITURE_BY_ID[f.def].interactions;
+          run.interaction = defs.find((i) => i.tags?.includes("eat")) ?? defs[0];
         } else {
           f = w.getFurniture(step.target ?? "");
           if (!f) return;
-          run.interaction = FURNITURE_BY_ID[f.def].interactions.find((i) => i.id === step.interaction) ?? FURNITURE_BY_ID[f.def].interactions[0];
+          const defs = FURNITURE_BY_ID[f.def].interactions;
+          run.interaction = defs.find((i) => i.id === step.interaction) ?? defs[0];
         }
         if (!run.interaction) return;
         run.furniture = f;
@@ -177,41 +180,40 @@ export class Character {
           this.game.noteContention(this, occupant, FURNITURE_BY_ID[f.def].name);
           return;
         }
-        const best = this.nearestSpot(w.accessSpots(f));
-        if (!best) {
-          this.game.emit(this, `你走不到${FURNITURE_BY_ID[f.def].name}那里。`, 1);
+        // 先走到家具前（坐/躺的家具也是先走到前面，开始时再坐上去）
+        const spot = w.spotFor(f, run.interaction.onTop ? undefined : run.interaction);
+        const p = this.pathTo(spot);
+        if (!p) {
+          this.game.emit(this, `你走不到${FURNITURE_BY_ID[f.def].name}那里（可能没有楼梯连通）。`, 1);
           return;
         }
-        run.path = best.path;
+        run.path = p;
         break;
       }
       case "goto": {
         const t = step.target ?? "";
         const f = w.getFurniture(t);
         const other = this.game.chars.find((c) => c.id === t || c.name === t);
-        let p: { x: number; y: number }[] | null = null;
-        if (f) p = this.nearestSpot(w.accessSpots(f))?.path ?? null;
-        else if (other) p = this.nearestSpot(this.spotsAround(other))?.path ?? null;
-        else {
-          const tile = w.randomTileIn(t);
-          if (tile) p = pathTo(tile.x, tile.y);
-        }
+        let p: Vec3[] | null = null;
+        if (f) p = this.pathTo(w.spotFor(f));
+        else if (other) p = this.pathTo(this.besideOf(other));
+        else p = this.pathTo(w.randomSpotIn(t));
         if (!p) return;
         run.path = p;
         break;
       }
       case "wander": {
-        const tile = w.randomTileIn(Math.random() < 0.7 ? this.room : undefined);
-        const p = tile ? pathTo(tile.x, tile.y) : null;
+        const here = this.room;
+        const p = this.pathTo(w.randomSpotIn(Math.random() < 0.7 && w.roomByName(here) ? here : undefined));
         if (!p) return;
-        run.path = p.slice(0, 12);
+        run.path = p;
         break;
       }
       case "talk": {
         const other = this.game.chars.find((c) => c.id === step.target || c.name === step.target);
         if (!other || other === this) return;
-        const dist = Math.hypot(other.d.pos.x - this.d.pos.x, other.d.pos.y - this.d.pos.y);
-        if (dist > 1.8) run.path = this.nearestSpot(this.spotsAround(other))?.path ?? [];
+        const dist = Math.hypot(other.d.pos.x - this.d.pos.x, (other.d.pos.y - this.d.pos.y) * 3);
+        if (dist > 0.45) run.path = this.pathTo(this.besideOf(other)) ?? [];
         break;
       }
       default:
@@ -221,21 +223,13 @@ export class Character {
     this.d.activity = this.describeStep(step, run);
   }
 
-  private spotsAround(other: Character) {
-    const w = this.game.world;
-    const { x, y } = other.tile;
-    return [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]
-      .map(([dx, dy]) => ({ x: x + dx, y: y + dy }))
-      .filter((s) => w.walkable(s.x, s.y));
-  }
-
-  private nearestSpot(spots: { x: number; y: number }[]) {
-    let best: { path: { x: number; y: number }[]; len: number } | null = null;
-    for (const s of spots) {
-      const p = this.game.world.findPath(this.tile.x, this.tile.y, s.x, s.y);
-      if (p && (!best || p.length < best.len)) best = { path: p, len: p.length };
-    }
-    return best;
+  /** 另一个角色身边的位置 */
+  private besideOf(other: Character): Vec3 {
+    const r = this.game.world.roomOfPos(other.d.pos);
+    const side = this.d.pos.x < other.d.pos.x ? -0.28 : 0.28;
+    let x = other.d.pos.x + side;
+    if (r) x = Math.max(r.gx + 0.08, Math.min(r.gx + r.w - 0.08, x));
+    return { x, y: other.d.pos.y, z: Math.min(0.92, Math.max(0.5, other.d.pos.z)) };
   }
 
   describeStep(step: PlanStep, run?: Running) {
@@ -266,37 +260,33 @@ export class Character {
     if (now >= run.endsAt) this.finishRun(true);
   }
 
-  /** 沿路径移动，还在走就返回 true */
-  private followPath(path: { x: number; y: number }[], dt: number) {
+  /** 沿路点移动，还在走就返回 true */
+  private followPath(path: Vec3[], dt: number) {
     if (!path.length) {
       this.moving = false;
       return false;
     }
+    const p = this.d.pos;
     const next = path[0];
-    const tx = next.x + 0.5, ty = next.y + 0.5;
-    const dx = tx - this.d.pos.x, dy = ty - this.d.pos.y;
-    const dist = Math.hypot(dx, dy);
+    // 纵深方向在画面上更短，走得快一些；上下楼慢一些
+    const dx = next.x - p.x, dy = next.y - p.y, dz = (next.z - p.z) * 0.5;
+    const dist = Math.hypot(dx, dy * 1.4, dz);
     const stepLen = SPEED * dt * (this.d.illness ? 0.7 : 1);
     this.moving = true;
     this.pose = "walk";
-    // 屏幕上的左右：x 增大往右下，y 增大往左下
-    const sx = dx - dy;
-    if (Math.abs(sx) > 0.01) this.d.facing = sx > 0 ? 1 : -1;
-    this.back = dx + dy < -0.01;
-    if (dist <= stepLen) {
-      this.d.pos.x = tx;
-      this.d.pos.y = ty;
+    if (Math.abs(dx) > 0.01) this.d.facing = dx > 0 ? 1 : -1;
+    if (dist <= stepLen || dist < 1e-4) {
+      p.x = next.x; p.y = next.y; p.z = next.z;
       path.shift();
     } else {
-      this.d.pos.x += (dx / dist) * stepLen;
-      this.d.pos.y += (dy / dist) * stepLen;
+      const k = stepLen / dist;
+      p.x += dx * k; p.y += dy * k; p.z += (next.z - p.z) * k;
     }
     return true;
   }
 
   private beginAct(run: Running, now: number) {
     this.moving = false;
-    this.back = false;
     const step = run.step;
     const scale = this.game.settings.timeScale;
     const secondsFor = (minutes: number) => (minutes * 60) / scale;
@@ -318,29 +308,22 @@ export class Character {
         this.usingFurniture = f.uid;
         this.pose = it.pose;
         if (it.onTop) {
-          run.returnTo = { ...this.tile };
-          const c = this.game.world.centerOf(f);
-          this.d.pos.x = c.x;
-          this.d.pos.y = c.y;
-        } else {
-          const c = this.game.world.centerOf(f);
-          const sx = c.x - this.d.pos.x - (c.y - this.d.pos.y);
-          if (Math.abs(sx) > 0.05) this.d.facing = sx > 0 ? 1 : -1;
-          this.back = c.x + c.y < this.d.pos.x + this.d.pos.y;
+          run.returnTo = { ...this.d.pos };
+          const s = this.game.world.spotFor(f, it);
+          if (s) this.d.pos = { ...s };
+          this.hidden = it.pose === "lie";
         }
         if (it.turnsOn) f.state = { ...f.state, on: true };
         if (f.def === "lamp" && it.id === "toggle") f.state = { ...f.state, on: !f.state?.on };
         if (step.do === "eat" || it.tags?.includes("eat")) this.consumeFood(f);
         if (it.news) this.game.deliverNews(this, FURNITURE_BY_ID[f.def].name);
-        if (it.tags?.includes("rest") && this.d.illness) this.showEmote("💤", 4);
-        else if (it.pose === "lie") this.showEmote("💤", 4);
+        if (it.pose === "lie") this.showEmote("💤", 4);
         break;
       }
       case "talk": {
         const other = this.game.chars.find((c) => c.id === step.target || c.name === step.target);
         if (other) {
-          const sx = other.d.pos.x - this.d.pos.x - (other.d.pos.y - this.d.pos.y);
-          if (Math.abs(sx) > 0.05) this.d.facing = sx > 0 ? 1 : -1;
+          if (Math.abs(other.d.pos.x - this.d.pos.x) > 0.02) this.d.facing = other.d.pos.x > this.d.pos.x ? 1 : -1;
           if (step.line) {
             this.say(step.line);
             this.game.deliverTalk(this, other, step.line);
@@ -390,17 +373,15 @@ export class Character {
     if (f && this.usingFurniture === f.uid) {
       this.usingFurniture = null;
       if (run.interaction?.turnsOn && !this.game.occupantOf(f.uid)) f.state = { ...f.state, on: false };
-      // 做饭完成：在最近的餐桌上放一份饭
+      // 做饭完成：在餐桌上放一份饭
       if (completed && run.interaction?.tags?.includes("cook")) this.game.cookedMeal(this);
       if (completed && f.def === "medicine" && this.d.illness) {
         this.d.illness.severity = clamp(this.d.illness.severity - 15);
         this.game.log("event", `${this.name}吃了药`, this.id);
       }
     }
-    if (run.returnTo) {
-      this.d.pos.x = run.returnTo.x + 0.5;
-      this.d.pos.y = run.returnTo.y + 0.5;
-    }
+    if (run.returnTo) this.d.pos = { ...run.returnTo };
+    this.hidden = false;
     this.pose = "stand";
     this.moving = false;
     if (!this.queue.length) this.d.activity = "发呆";
