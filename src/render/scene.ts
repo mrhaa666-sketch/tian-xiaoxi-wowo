@@ -1,6 +1,9 @@
 // 场景渲染：地板、墙、家具、食物、角色、气泡，以及镜头（拖动、缩放）。
-import { Application, ColorMatrixFilter, Container, FillGradient, FillPattern, Graphics, Matrix, Sprite, Text, type Texture } from "pixi.js";
+import { Application, Container, FillGradient, FillPattern, Graphics, Matrix, Sprite, Text, type Texture } from "pixi.js";
 import { currentHour, daylightAt, type Daylight } from "./daylight";
+
+/** 文字按屏幕的实际清晰度渲染，不然在手机上会发糊、有颗粒 */
+const TEXT_RES = Math.min(3, Math.max(2, window.devicePixelRatio || 1));
 import { getTexture, onAssetsChanged } from "./assets";
 import type { FurnitureInst } from "../core/types";
 import type { Character } from "../sim/character";
@@ -62,9 +65,9 @@ export class Scene {
   private skyGrad: { key: string; g: FillGradient } | null = null;
   private stars: { x: number; y: number; r: number; p: number }[] = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random() * 0.75, r: 0.6 + Math.random() * 1.4, p: Math.random() * 6.28 }));
   private clouds: { x: number; y: number; s: number; v: number }[] = Array.from({ length: 5 }, () => ({ x: Math.random(), y: 0.08 + Math.random() * 0.35, s: 0.6 + Math.random() * 0.8, v: 0.004 + Math.random() * 0.006 }));
-  private lightFilter = new ColorMatrixFilter();
   private lightKey = "";
   private glow = new Graphics();
+  private roomLabels: Text[] = [];
   private builtLightHour = -1;
   daylight: Daylight = daylightAt(12);
   private skins = new Map<string, CharSkin>();
@@ -101,17 +104,14 @@ export class Scene {
   }
 
   async init(host: HTMLElement) {
-    await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, 2), autoDensity: true });
+    await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, 3), autoDensity: true });
     host.appendChild(this.app.canvas);
     this.objects.sortableChildren = true;
     this.camera.addChild(this.floorLayer, this.objects, this.ghostG);
     this.zoom = Math.min(0.7, Math.max(0.35, this.app.screen.width / 1900));
     this.glow.blendMode = "add";
-    // 滤镜默认只按 1 倍分辨率、不抗锯齿地画，手机上缩小后边缘全是锯齿：跟画面保持一致
-    this.lightFilter.resolution = "inherit";
-    this.lightFilter.antialias = "inherit";
     this.app.stage.addChild(this.sky, this.camera, this.glow, this.tint, this.overlay);
-    this.camera.filters = [this.lightFilter];
+
     this.camera.scale.set(this.zoom);
     this.rebuildStatic();
     this.showAll(true);
@@ -175,6 +175,7 @@ export class Scene {
     for (const o of this.staticObjs) o.destroy({ children: true });
     this.staticObjs = [];
     this.floorLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.roomLabels = [];
 
     // 地板：每个房间一张 Graphics，方便单间模式下调暗其他房间
     const byRoom = new Map<string, Graphics>();
@@ -216,7 +217,7 @@ export class Scene {
       if (!room) continue;
       const cx = tiles.reduce((a, t) => a + t[0], 0) / tiles.length + 0.5;
       const cy = tiles.reduce((a, t) => a + t[1], 0) / tiles.length + 0.5;
-      const label = new Text({ text: room, style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 20, fill: 0xffffff, fontWeight: "700", stroke: { color: 0x5a4a44, width: 4 } } });
+      const label = new Text({ resolution: TEXT_RES, text: room, style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 20, fill: 0xffffff, fontWeight: "700", stroke: { color: 0x5a4a44, width: 4 } } });
       label.anchor.set(0.5);
       const p = toScreen(cx, cy);
       label.position.set(p.x, p.y);
@@ -225,6 +226,7 @@ export class Scene {
       holder.label = room;
       holder.addChild(label);
       this.floorLayer.addChild(holder);
+      this.roomLabels.push(label);
     }
 
     // 墙。镜头正对房间：东西向的墙（N）正面朝向镜头，南北向的墙（W）只看得到一条竖着的墙顶。
@@ -560,6 +562,8 @@ export class Scene {
     this.applyFocus();
     this.drawGhost();
     this.drawTint();
+    // 缩得很小时房间名只剩一团糊掉的小字，干脆不显示（选中房间、放大后再显示）
+    for (const l of this.roomLabels) if (!l.destroyed) l.visible = this.zoom > 0.42;
     this.drawSky(t);
     this.applyLight();
     this.drawGlow(t);
@@ -602,14 +606,17 @@ export class Scene {
     }
   }
 
-  /** 整栋房子的调色（清晨偏粉、正午明亮、傍晚偏橙、夜里偏暗蓝） */
+  /**
+   * 整栋房子的调色（清晨偏粉、傍晚偏橙、夜里偏暗蓝）。
+   * 直接给整个镜头容器染色（相当于乘上一个颜色），不用滤镜：滤镜要先画到一张中间图上，手机上会出锯齿。
+   * 染色只能变暗不能变亮，所以正午保持原色。
+   */
   private applyLight() {
-    const [r, g, b] = this.daylight.mul;
+    const [r, g, b] = this.daylight.mul.map((v) => Math.min(1, v));
     const key = `${r.toFixed(3)},${g.toFixed(3)},${b.toFixed(3)}`;
     if (key === this.lightKey) return;
     this.lightKey = key;
-    this.lightFilter.matrix = [r, 0, 0, 0, 0, 0, g, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, 1, 0];
-    this.camera.filters = Math.abs(r - 1) + Math.abs(g - 1) + Math.abs(b - 1) < 0.02 ? [] : [this.lightFilter];
+    this.camera.tint = (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
   }
 
   /** 夜里的灯光：有人醒着的房间开灯，台灯落地灯有光晕，院子里有萤火虫 */
@@ -674,9 +681,9 @@ export class Scene {
     if (!b) {
       const box = new Container();
       const bg = new Graphics();
-      const text = new Text({ text: "", style: { fontFamily: "Noto Sans SC, PingFang SC, Microsoft YaHei, sans-serif", fontSize: 14, fill: 0x2e2a33, wordWrap: true, wordWrapWidth: 170, breakWords: true, lineHeight: 19 } });
-      const emote = new Text({ text: "", style: { fontSize: 22, fontFamily: "sans-serif" } });
-      const name = new Text({ text: "", style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 12, fill: 0xffffff, fontWeight: "700" } });
+      const text = new Text({ resolution: TEXT_RES, text: "", style: { fontFamily: "Noto Sans SC, PingFang SC, Microsoft YaHei, sans-serif", fontSize: 14, fill: 0x2e2a33, wordWrap: true, wordWrapWidth: 170, breakWords: true, lineHeight: 19 } });
+      const emote = new Text({ resolution: TEXT_RES, text: "", style: { fontSize: 22, fontFamily: "sans-serif" } });
+      const name = new Text({ resolution: TEXT_RES, text: "", style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 12, fill: 0xffffff, fontWeight: "700" } });
       emote.anchor.set(0.5, 1);
       name.anchor.set(0.5, 0);
       box.addChild(bg, text, emote, name);
