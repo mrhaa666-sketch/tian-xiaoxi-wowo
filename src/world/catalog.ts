@@ -256,6 +256,21 @@ export const FOODS: FoodDef[] = [
   { id: "fruit", name: "水果拼盘", hunger: 18, mood: 10, color: 0xf27a7a },
   { id: "porridge", name: "白粥（病号餐）", hunger: 30, mood: 4, color: 0xf5f0e1 },
   { id: "cake", name: "小蛋糕", hunger: 15, mood: 18, color: 0xf7b8d2 },
+  { id: "onigiri", name: "饭团", hunger: 30, mood: 5, color: 0xf4f1ea },
+  { id: "curry", name: "咖喱饭", hunger: 55, mood: 10, color: 0xe2a13e },
+  { id: "ramen", name: "拉面", hunger: 55, mood: 12, color: 0xe8b77a },
+  { id: "pudding", name: "焦糖布丁", hunger: 12, mood: 16, color: 0xf3c86b },
+  { id: "tea", name: "红茶和饼干", hunger: 8, mood: 12, color: 0xb5623a },
+  { id: "birthday_cake", name: "生日蛋糕", hunger: 20, mood: 30, color: 0xf7c6d8 },
+  { id: "dumplings", name: "饺子", hunger: 50, mood: 15, color: 0xf6efe0 },
+  { id: "tangyuan", name: "汤圆", hunger: 30, mood: 15, color: 0xffffff },
+  { id: "zongzi", name: "粽子", hunger: 40, mood: 12, color: 0x8fb87a },
+  { id: "mooncake", name: "月饼", hunger: 25, mood: 15, color: 0xd9a35b },
 ];
+
+/** 节日当天自动摆上餐桌的食物 */
+export const FESTIVAL_FOODS: Record<string, string> = {
+  春节: "dumplings", 除夕: "dumplings", 元宵节: "tangyuan", 端午节: "zongzi", 中秋节: "mooncake",
+};
 
 export const FOOD_BY_ID = Object.fromEntries(FOODS.map((f) => [f.id, f])) as Record<string, FoodDef>;

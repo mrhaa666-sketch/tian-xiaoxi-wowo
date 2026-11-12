@@ -1,7 +1,7 @@
 // 游戏总控：世界、角色、事件、日志、存档，以及时间和节日。
 import type { CharacterData, LogEntry, NewsItem, SaveData, Settings } from "../core/types";
 import { dateKey, festivalHint, festivalsOf, hhmm, parseSchedule } from "../core/time";
-import { FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
+import { FESTIVAL_FOODS, FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
 import { buildStarterHouse } from "../world/presets";
 import { World, uid } from "../world/world";
 import { Character, clamp } from "./character";
@@ -370,6 +370,20 @@ export class Game {
     if (changed) this.changed();
   }
 
+  /** 节日食物：在餐桌上摆一份，告诉大家可以去吃 */
+  serveFestivalFood(festival: string) {
+    const kind = FESTIVAL_FOODS[festival];
+    if (!kind) return;
+    const table = this.world.data.furniture.find((f) => FURNITURE_BY_ID[f.def].interactions.some((i) => i.tags?.includes("eat")));
+    if (!table || this.world.foodsOn(table.uid).some((x) => x.kind === kind)) return;
+    const room = this.world.roomOf(table.x, table.y);
+    // 每个人一份
+    for (let i = 0; i < Math.max(1, Math.min(3, this.chars.length)); i++) this.world.data.foods.push({ uid: uid("food"), kind, furniture: table.uid, x: table.x, y: table.y });
+    this.log("event", `${room}的餐桌上摆好了${FOOD_BY_ID[kind].name}`);
+    for (const c of this.chars) this.emit(c, `${festival}到了，${room}的餐桌上摆好了${FOOD_BY_ID[kind].name}，可以去吃。`, 2);
+    this.changed();
+  }
+
   private checkClock(initial = false) {
     const now = new Date();
     const today = dateKey(now);
@@ -380,6 +394,7 @@ export class Game {
       this.firedFestivals[f] = today;
       this.log("festival", `今天是${f}！`);
       for (const c of this.chars) this.emit(c, `今天是${f}（${festivalHint(f)}）。`, 2);
+      this.serveFestivalFood(f);
     }
     // 作息提醒：时间点到了（或刚过去 3 分钟内）就提醒一次
     const nowMin = now.getHours() * 60 + now.getMinutes();
