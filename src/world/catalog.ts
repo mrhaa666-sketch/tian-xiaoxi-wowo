@@ -6,7 +6,7 @@ export interface FloorDef {
   name: string;
   color: number;
   line: number;
-  outdoor?: boolean;
+  outdoor?: boolean; // 室外地面：不画墙根阴影
 }
 
 export const FLOORS: FloorDef[] = [
@@ -23,6 +23,7 @@ export const WALL_STYLES: { id: string; name: string; color: number; top: number
   { id: "sky", name: "天蓝墙", color: 0xcfe3f2, top: 0xe6f1fa },
   { id: "peach", name: "蜜桃墙", color: 0xf6d3c4, top: 0xfbe7de },
   { id: "sage", name: "鼠尾草墙", color: 0xd3e2cf, top: 0xe8f0e5 },
+  { id: "lilac", name: "淡紫墙", color: 0xe3dcf0, top: 0xf0ecf7 },
 ];
 
 export interface InteractionDef {

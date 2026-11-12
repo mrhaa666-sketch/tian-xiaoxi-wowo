@@ -1,8 +1,8 @@
 // 等距投影：一格地板在屏幕上是 128×64 的菱形。
 export const TW = 128;
 export const TH = 64;
-export const WALL_H = 150;
-export const WALL_LOW = 14;
+export const WALL_H = 170;
+export const WALL_LOW = 30;
 
 export function toScreen(x: number, y: number) {
   return { x: (x - y) * (TW / 2), y: (x + y) * (TH / 2) };

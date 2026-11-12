@@ -15,7 +15,22 @@ async function boot() {
   const scene = new Scene(game);
   await scene.init(ui.stage);
 
-  ui.onSelect = (id) => (scene.selected = id);
+  const setView = () => { ui.view = scene.view; ui.renderView(); };
+  ui.onView = (v) => {
+    if (v.mode === "all") scene.showAll();
+    else if (v.mode === "room") scene.showRoom(v.name);
+    else scene.stepRoom(v.dir);
+    setView();
+  };
+  ui.onSelect = (id) => {
+    scene.selected = id;
+    // 单间模式下选中角色：跳到 TA 所在的房间；全景模式下重新排版给详情面板让位
+    const c = id ? game.byId(id) : null;
+    if (scene.view.mode === "room" && c && game.world.rooms().includes(c.room)) scene.showRoom(c.room);
+    else scene.refit();
+    setView();
+  };
+  window.addEventListener("resize", () => setTimeout(() => scene.refit(true), 50));
   ui.onSettingsChanged = () => brain.reconfigure();
   brain.onStatus = () => ui.renderTop();
 
@@ -33,6 +48,11 @@ async function boot() {
     game.tick(dt);
     brain.tick();
     scene.update(now / 1000);
+    // 单间模式下，选中的角色走到别的房间时镜头跟过去
+    if (scene.view.mode === "room" && scene.selected) {
+      const c = game.byId(scene.selected);
+      if (c && !c.moving && c.room !== scene.view.name && game.world.rooms().includes(c.room)) { scene.showRoom(c.room); setView(); }
+    }
     uiAcc += dt;
     if (uiAcc > 0.5) {
       uiAcc = 0;
@@ -41,6 +61,7 @@ async function boot() {
       if (dirty) {
         dirty = false;
         ui.renderRoster();
+        ui.renderView();
         if (!ui.build.on) ui.renderLog();
       }
     }
@@ -140,6 +161,14 @@ async function boot() {
   };
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  // 双击房间：进入单间
+  canvas.addEventListener("dblclick", (e) => {
+    if (ui.build.on) return;
+    const r = canvas.getBoundingClientRect();
+    const g = scene.screenToGrid(e.clientX - r.left, e.clientY - r.top);
+    const room = game.world.tile(Math.floor(g.x), Math.floor(g.y))?.room;
+    if (room) { scene.showRoom(room); setView(); }
+  });
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     const p = local(e);
@@ -218,6 +247,7 @@ async function boot() {
   window.addEventListener("keydown", (e) => {
     if ((e.target as HTMLElement).closest("input, textarea, select")) return;
     if (e.key === "r" || e.key === "R") ui.build.rot = ui.build.rot ? 0 : 1;
+    if (!ui.build.on && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { scene.stepRoom(e.key === "ArrowLeft" ? -1 : 1); setView(); }
     if (e.key === "Escape") { if (ui.build.on) { ui.build.on = false; ui.renderBuild(); } else ui.select(null); }
   });
 

@@ -7,7 +7,21 @@ import { FLOOR_BY, FOOD_COLORS } from "./palette";
 import { FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
 import { footprint, key } from "../world/world";
 import { ProceduralSkin, type CharSkin } from "./charview";
-import { WALL_H, WALL_LOW, shade, toGrid, toScreen } from "./iso";
+import { drawStandee } from "./standees";
+import { WALL_H, WALL_LOW, hex, shade, toGrid, toScreen } from "./iso";
+
+/** 立牌高度（像素） */
+const STANDEE_H: Record<string, number> = {
+  bed: 46, wardrobe: 150, lamp: 125, sofa: 62, tv: 95, plant: 64, fridge: 150, stove: 82, sink: 82,
+  table: 66, chair: 56, desk: 74, bookshelf: 150, bathtub: 56, toilet: 66, medicine: 72,
+};
+
+/** 立牌宽度：按占地的格数估算 */
+function standeeWidth(def: string, w: number, h: number) {
+  const thin: Record<string, number> = { lamp: 40, plant: 52, chair: 48, toilet: 52, medicine: 56 };
+  if (thin[def]) return thin[def];
+  return 66 + (Math.max(w, h) - 1) * 74;
+}
 
 const WALL_BY = Object.fromEntries(WALL_STYLES.map((w) => [w.id, w]));
 
@@ -26,7 +40,7 @@ export interface Ghost {
 export class Scene {
   app = new Application();
   camera = new Container();
-  private floorG = new Graphics();
+  private floorLayer = new Container();
   private objects = new Container();
   private ghostG = new Graphics();
   private overlay = new Container();
@@ -39,6 +53,8 @@ export class Scene {
   selected: string | null = null;
   ghost: Ghost | null = null;
   zoom = 0.7;
+  view: { mode: "all" } | { mode: "room"; name: string } = { mode: "all" };
+  private camTarget: { x: number; y: number; zoom: number } | null = null;
 
   constructor(private game: Game) {}
 
@@ -46,11 +62,12 @@ export class Scene {
     await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, 2), autoDensity: true });
     host.appendChild(this.app.canvas);
     this.objects.sortableChildren = true;
-    this.camera.addChild(this.floorG, this.objects, this.ghostG);
+    this.camera.addChild(this.floorLayer, this.objects, this.ghostG);
     this.zoom = Math.min(0.7, Math.max(0.35, this.app.screen.width / 1900));
     this.app.stage.addChild(this.camera, this.tint, this.overlay);
     this.camera.scale.set(this.zoom);
-    this.centerOn(5, 4);
+    this.rebuildStatic();
+    this.showAll(true);
   }
 
   setBackground(color: number) {
@@ -64,11 +81,13 @@ export class Scene {
   }
 
   panBy(dx: number, dy: number) {
+    this.camTarget = null;
     this.camera.x += dx;
     this.camera.y += dy;
   }
 
   zoomAt(factor: number, sx: number, sy: number) {
+    this.camTarget = null;
     const z = Math.min(2.2, Math.max(0.25, this.zoom * factor));
     const k = z / this.zoom;
     this.camera.x = sx - (sx - this.camera.x) * k;
@@ -108,133 +127,237 @@ export class Scene {
     this.builtWallMode = this.game.settings.wallMode;
     for (const o of this.staticObjs) o.destroy({ children: true });
     this.staticObjs = [];
+    this.floorLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
 
-    const fg = this.floorG;
-    fg.clear();
+    // 地板：每个房间一张 Graphics，方便单间模式下调暗其他房间
+    const byRoom = new Map<string, Graphics>();
+    const roomTiles = new Map<string, [number, number][]>();
     for (const [k, t] of Object.entries(w.data.tiles)) {
       const [x, y] = k.split(",").map(Number);
+      const room = t.room ?? "";
+      let g = byRoom.get(room);
+      if (!g) {
+        g = new Graphics();
+        g.label = room;
+        byRoom.set(room, g);
+        this.floorLayer.addChild(g);
+      }
+      if (!roomTiles.has(room)) roomTiles.set(room, []);
+      roomTiles.get(room)!.push([x, y]);
       const fl = FLOOR_BY[t.floor] ?? FLOOR_BY.wood;
       const pts = [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)];
-      fg.poly(pts.flatMap((p) => [p.x, p.y])).fill((x + y) % 2 ? fl.color : shade(fl.color, 0.97)).stroke({ width: 1, color: fl.line, alpha: 0.6 });
+      g.poly(pts.flatMap((p) => [p.x, p.y])).fill((x + y) % 2 ? fl.color : shade(fl.color, 0.96)).stroke({ width: 1, color: fl.line, alpha: 0.5 });
+      // 室内地板在墙根处加一圈阴影，房间的边界更清楚
+      const shadeEdge = (nx: number, ny: number, a: { x: number; y: number }, b: { x: number; y: number }) => {
+        const n = w.tile(nx, ny);
+        if (n && n.room === t.room) return;
+        const mid = toScreen(x + 0.5, y + 0.5);
+        const k2 = 0.16;
+        const a2 = { x: a.x + (mid.x - a.x) * k2, y: a.y + (mid.y - a.y) * k2 }, b2 = { x: b.x + (mid.x - b.x) * k2, y: b.y + (mid.y - b.y) * k2 };
+        g!.poly([a.x, a.y, b.x, b.y, b2.x, b2.y, a2.x, a2.y]).fill({ color: 0x000000, alpha: 0.07 });
+      };
+      if (!FLOOR_BY[t.floor]?.outdoor) {
+        shadeEdge(x, y - 1, pts[0], pts[1]);
+        shadeEdge(x - 1, y, pts[0], pts[3]);
+      }
     }
 
-    // 墙
+    // 房间名牌
+    for (const [room, tiles] of roomTiles) {
+      if (!room) continue;
+      const cx = tiles.reduce((a, t) => a + t[0], 0) / tiles.length + 0.5;
+      const cy = tiles.reduce((a, t) => a + t[1], 0) / tiles.length + 0.5;
+      const label = new Text({ text: room, style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 20, fill: 0xffffff, fontWeight: "700", stroke: { color: 0x5a4a44, width: 4 } } });
+      label.anchor.set(0.5);
+      const p = toScreen(cx, cy);
+      label.position.set(p.x, p.y);
+      label.alpha = 0.9;
+      const holder = new Container();
+      holder.label = room;
+      holder.addChild(label);
+      this.floorLayer.addChild(holder);
+    }
+
+    // 墙：有厚度。后墙（外面没有地板的那一侧）是高墙，其余在「矮墙」模式下只留一截墙沿
+    const T = 0.08;
     for (const [k, wall] of Object.entries(w.data.walls)) {
       const [xs, ys, d] = k.split(",");
       const x = Number(xs), y = Number(ys);
       const dir = d as "N" | "W";
-      const behindEmpty = dir === "N" ? !w.tile(x, y - 1) : !w.tile(x - 1, y);
-      const frontEmpty = !w.tile(x, y);
-      if (behindEmpty && frontEmpty) continue;
-      const isBack = behindEmpty && !frontEmpty;
+      const behind = dir === "N" ? w.tile(x, y - 1) : w.tile(x - 1, y);
+      const front = w.tile(x, y);
+      if (!behind && !front) continue;
+      const isBack = !behind && !!front;
       const h = cutaway && !isBack ? WALL_LOW : WALL_H;
       const style = WALL_BY[wall.style] ?? WALL_STYLES[0];
-      const a = toScreen(x, y);
-      const b = dir === "N" ? toScreen(x + 1, y) : toScreen(x, y + 1);
+      // 墙的两条边线：靠后的一条和靠前的一条
+      const off = dir === "N" ? (u: number, t: number) => toScreen(x + u, y + t) : (u: number, t: number) => toScreen(x + t, y + u);
+      const P = (u: number, t: number, v: number) => { const q = off(u, t); return { x: q.x, y: q.y - v }; };
       const g = new Graphics();
-      const base = dir === "N" ? style.color : shade(style.color, 0.9);
-      const lerp = (u: number, v: number) => ({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u - v });
-      const quad = (u0: number, u1: number, v0: number, v1: number) => {
-        const p = [lerp(u0, v0), lerp(u1, v0), lerp(u1, v1), lerp(u0, v1)];
-        return p.flatMap((q) => [q.x, q.y]);
-      };
+      g.label = (front ?? behind)?.room ?? "";
+      const face = dir === "N" ? style.color : shade(style.color, 0.9);
+      const poly = (pts: { x: number; y: number }[], color: number, alpha = 1) => g.poly(pts.flatMap((p) => [p.x, p.y])).fill({ color, alpha });
+      const faceQuad = (u0: number, u1: number, v0: number, v1: number) => [P(u0, T / 2, v0), P(u1, T / 2, v0), P(u1, T / 2, v1), P(u0, T / 2, v1)];
+      const segs: [number, number, number, number][] = [];
       if (wall.kind === "door") {
-        g.poly(quad(0, 0.12, 0, h)).fill(base).poly(quad(0.88, 1, 0, h)).fill(base);
-        if (h > WALL_LOW) g.poly(quad(0.12, 0.88, h * 0.78, h)).fill(base);
-        g.poly(quad(0.12, 0.88, 0, 3)).fill(0xb98b62);
-      } else {
-        g.poly(quad(0, 1, 0, h)).fill(base).stroke({ width: 1, color: shade(base, 0.85) });
-        g.poly(quad(0, 1, h, h + 6)).fill(style.top);
-        if (wall.kind === "window" && h > WALL_LOW) {
+        segs.push([0, 0.14, 0, h], [0.86, 1, 0, h]);
+        if (h > WALL_LOW) segs.push([0.14, 0.86, h * 0.72, h]);
+      } else segs.push([0, 1, 0, h]);
+      for (const [u0, u1, v0, v1] of segs) {
+        poly(faceQuad(u0, u1, v0, v1), face);
+        // 踢脚线
+        if (v0 === 0) poly(faceQuad(u0, u1, 0, Math.min(10, v1)), shade(face, 0.82));
+        // 墙顶：有厚度的一条
+        poly([P(u0, -T / 2, v1), P(u1, -T / 2, v1), P(u1, T / 2, v1), P(u0, T / 2, v1)], shade(style.top, 0.97));
+        // 墙的端面
+        poly([P(u1, -T / 2, v0), P(u1, T / 2, v0), P(u1, T / 2, v1), P(u1, -T / 2, v1)], shade(face, 0.7));
+      }
+      if (wall.kind === "door") poly(faceQuad(0.14, 0.86, 0, 3), 0xb98b62);
+      if (wall.kind === "window") {
+        if (h > WALL_LOW) {
           const hour = new Date().getHours();
           const sky = hour >= 19 || hour < 6 ? 0x2f3d66 : hour < 8 || hour >= 17 ? 0xf6c59a : 0xa9d8f5;
-          g.poly(quad(0.2, 0.8, h * 0.35, h * 0.8)).fill(sky).stroke({ width: 4, color: 0xffffff });
-          g.poly(quad(0.49, 0.51, h * 0.35, h * 0.8)).fill(0xffffff);
-        } else if (wall.kind === "window") {
-          g.poly(quad(0.2, 0.8, h, h + 6)).fill(0xa9d8f5);
-        }
+          poly(faceQuad(0.18, 0.82, h * 0.32, h * 0.8), 0xffffff);
+          poly(faceQuad(0.23, 0.77, h * 0.36, h * 0.76), sky);
+          poly(faceQuad(0.49, 0.51, h * 0.36, h * 0.76), 0xffffff);
+        } else poly([P(0.2, -T / 2, h + 0.5), P(0.8, -T / 2, h + 0.5), P(0.8, T / 2, h + 0.5), P(0.2, T / 2, h + 0.5)], 0xa9d8f5);
       }
-      // 墙要画在它后面那一格的东西之后、前面那一格之前
-      g.zIndex = (x + y) * 10 - (dir === "N" ? 4 : 4) + (dir === "N" ? 0.1 : 0);
+      g.zIndex = (x + y) * 10 - 4 + (dir === "N" ? 0.1 : 0);
       this.objects.addChild(g);
       this.staticObjs.push(g);
     }
   }
 
-  private furnitureViews = new Map<string, { box: Container; g: Graphics; label: Text; stateKey: string }>();
+  // ———————————————————— 视角：全景 / 单间 ————————————————————
 
+  /** 世界像素范围铺满画面（留出界面占用的边距） */
+  private fitRect(x0: number, y0: number, x1: number, y1: number, instant = false) {
+    const sw = this.app.screen.width, sh = this.app.screen.height;
+    const narrow = sw < 760;
+    const padL = narrow ? 12 : 250, padR = narrow ? 12 : this.selected ? 370 : 24, padT = 76, padB = narrow ? 120 : 30;
+    const aw = Math.max(100, sw - padL - padR), ah = Math.max(100, sh - padT - padB);
+    const zoom = Math.min(1.6, aw / (x1 - x0), ah / (y1 - y0));
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const t = { zoom, x: padL + aw / 2 - cx * zoom, y: padT + ah / 2 - cy * zoom };
+    if (instant) { this.zoom = t.zoom; this.camera.x = t.x; this.camera.y = t.y; this.camera.scale.set(t.zoom); this.camTarget = null; }
+    else this.camTarget = t;
+  }
+
+  private tilesBox(filter?: (room: string | undefined) => boolean) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [k, t] of Object.entries(this.game.world.data.tiles)) {
+      if (filter && !filter(t.room)) continue;
+      const [x, y] = k.split(",").map(Number);
+      for (const p of [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)]) {
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+      }
+    }
+    return { x0, y0: y0 - WALL_H, x1, y1 };
+  }
+
+  showAll(instant = false) {
+    this.view = { mode: "all" };
+    const b = this.tilesBox();
+    if (Number.isFinite(b.x0)) this.fitRect(b.x0 - 20, b.y0, b.x1 + 20, b.y1 + 20, instant);
+  }
+
+  showRoom(name: string, instant = false) {
+    const b = this.tilesBox((r) => r === name);
+    if (!Number.isFinite(b.x0)) return this.showAll(instant);
+    this.view = { mode: "room", name };
+    this.fitRect(b.x0 - 30, b.y0, b.x1 + 30, b.y1 + 30, instant);
+  }
+
+  /** 单间模式下按顺序切换房间 */
+  stepRoom(dir: 1 | -1) {
+    const rooms = this.game.world.rooms();
+    if (!rooms.length) return;
+    const cur = this.view.mode === "room" ? rooms.indexOf(this.view.name) : -1;
+    this.showRoom(rooms[(cur + dir + rooms.length) % rooms.length]);
+  }
+
+  refit(instant = false) {
+    if (this.view.mode === "room") this.showRoom(this.view.name, instant);
+    else this.showAll(instant);
+  }
+
+  /** 单间模式：其他房间调暗 */
+  private applyFocus() {
+    const focus = this.view.mode === "room" ? this.view.name : null;
+    const a = (room: string | undefined) => (!focus || room === focus ? 1 : 0.14);
+    for (const c of this.floorLayer.children) c.alpha = a(c.label);
+    for (const g of this.staticObjs) g.alpha = a(g.label);
+    for (const f of this.game.world.data.furniture) {
+      const v = this.furnitureViews.get(f.uid);
+      if (v) v.box.alpha = a(this.game.world.tile(f.x, f.y)?.room);
+    }
+    for (const c of this.game.chars) {
+      const al = a(c.room);
+      const s = this.skins.get(c.id);
+      if (s) s.view.alpha = al;
+      const b = this.bubbles.get(c.id);
+      if (b) b.box.alpha = al;
+    }
+  }
+
+  private furnitureViews = new Map<string, { box: Container; shadow: Graphics; g: Graphics; stateKey: string }>();
+
+  /** 家具画成立牌：一张正对镜头的平面图，立在占地范围的中心，脚下有影子 */
   private drawFurniture(f: FurnitureInst) {
     const def = FURNITURE_BY_ID[f.def];
     if (!def) return;
-    const stateKey = JSON.stringify(f.state ?? {}) + f.x + "," + f.y + f.rot + this.game.world.foodsOn(f.uid).length;
+    const occ = this.game.occupantOf(f.uid);
+    const lying = occ && occ.hidden ? occ : null;
+    const foods = this.game.world.foodsOn(f.uid).map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
+    const stateKey = [f.x, f.y, f.rot, f.state?.on ? 1 : 0, lying?.id ?? "", foods.join(",")].join("|");
     let v = this.furnitureViews.get(f.uid);
     if (v && v.stateKey === stateKey) return;
     if (!v) {
       const box = new Container();
+      const shadow = new Graphics();
       const g = new Graphics();
-      const label = new Text({ text: def.icon, style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 18, fill: 0x4a3b3b, fontWeight: "700" } });
-      label.anchor.set(0.5);
-      label.alpha = 0.55;
-      box.addChild(g, label);
-      v = { box, g, label, stateKey: "" };
+      box.addChild(shadow, g);
+      v = { box, shadow, g, stateKey: "" };
       this.furnitureViews.set(f.uid, v);
       this.objects.addChild(box);
     }
     v.stateKey = stateKey;
-    const g = v.g;
-    g.clear();
     const { w, h } = footprint(f);
-    const H = def.height;
-    const A = toScreen(f.x, f.y), B = toScreen(f.x + w, f.y), C = toScreen(f.x + w, f.y + h), D = toScreen(f.x, f.y + h);
-    const inset = def.walkable ? 0 : 0.08;
-    const lerp = (p: { x: number; y: number }, q: { x: number; y: number }, u: number) => ({ x: p.x + (q.x - p.x) * u, y: p.y + (q.y - p.y) * u });
-    // 往里收一点，家具之间留出缝
-    const a = lerp(A, C, inset), c = lerp(C, A, inset), b = lerp(B, D, inset), d = lerp(D, B, inset);
-    const up = (p: { x: number; y: number }) => ({ x: p.x, y: p.y - H });
-    const on = f.state?.on;
-    const top = def.top ?? shade(def.color, 1.12);
-    g.poly([d, c, up(c), up(d)].flatMap((p) => [p.x, p.y])).fill(shade(def.color, 0.82)).stroke({ width: 1.5, color: shade(def.color, 0.6) });
-    g.poly([c, b, up(b), up(c)].flatMap((p) => [p.x, p.y])).fill(shade(def.color, 0.68)).stroke({ width: 1.5, color: shade(def.color, 0.55) });
-    g.poly([up(a), up(b), up(c), up(d)].flatMap((p) => [p.x, p.y])).fill(top).stroke({ width: 1.5, color: shade(def.color, 0.6) });
-    // 家具细节
-    if (f.def === "bed") {
-      const pil = lerp(up(a), up(c), 0.18);
-      g.ellipse(pil.x, pil.y, 22, 10).fill(0xffffff).stroke({ width: 1, color: 0xcccccc });
-      g.poly([lerp(up(a), up(d), 0.45), lerp(up(b), up(c), 0.45), up(c), up(d)].flatMap((p) => [p.x, p.y])).fill(def.color);
+    v.g.clear();
+    v.shadow.clear();
+    if (def.walkable) {
+      // 地毯直接铺在地板上
+      const pts = [toScreen(f.x + 0.1, f.y + 0.1), toScreen(f.x + w - 0.1, f.y + 0.1), toScreen(f.x + w - 0.1, f.y + h - 0.1), toScreen(f.x + 0.1, f.y + h - 0.1)];
+      v.box.position.set(0, 0);
+      v.g.poly(pts.flatMap((p) => [p.x, p.y])).fill(def.color).stroke({ width: 4, color: shade(def.color, 1.12) });
+      v.box.zIndex = -1000;
+      return;
     }
-    if ((f.def === "tv" || f.def === "desk") && on) {
-      const s = lerp(up(a), up(c), 0.5);
-      g.roundRect(s.x - 18, s.y - 30, 36, 24, 3).fill(0x9fe0ff).stroke({ width: 2, color: 0x333333 });
-    }
-    if (f.def === "stove" && on) {
-      const s = lerp(up(a), up(c), 0.5);
-      g.ellipse(s.x, s.y, 12, 6).fill({ color: 0xff8a3d, alpha: 0.9 });
-    }
-    if (f.def === "lamp" && on) {
-      const s = lerp(a, c, 0.5);
-      g.ellipse(s.x, s.y, 70, 35).fill({ color: 0xffe9a8, alpha: 0.25 });
-    }
-    if (f.def === "plant") {
-      const s = up(lerp(a, c, 0.5));
-      g.circle(s.x, s.y - 14, 20).fill(0x5aa95e).circle(s.x - 12, s.y - 4, 13).fill(0x6fbf73).circle(s.x + 12, s.y - 6, 13).fill(0x4f9a53);
-    }
-    // 桌上的食物
-    const foods = this.game.world.foodsOn(f.uid);
-    foods.forEach((food, i) => {
-      const s = up(lerp(a, c, 0.35 + i * 0.2));
-      g.ellipse(s.x, s.y, 13, 7).fill(0xffffff).stroke({ width: 1.5, color: 0xaaaaaa });
-      g.ellipse(s.x, s.y - 3, 9, 5).fill(FOOD_COLORS[food.kind] ?? 0xf2a65a);
-    });
-    const center = up(lerp(a, c, 0.5));
-    v.label.position.set(center.x, center.y);
-    v.label.visible = !!def.icon && f.def !== "plant";
-    // 深度：取家具最靠前的那一格
-    v.box.zIndex = def.walkable ? -1000 : (f.x + w - 1 + f.y + h - 1) * 10 + 1;
+    const c = toScreen(f.x + w / 2, f.y + h / 2);
+    v.box.position.set(c.x, c.y);
+    const sw = standeeWidth(f.def, w, h);
+    const sh = STANDEE_H[f.def] ?? def.height;
+    // 影子：铺满占地范围的菱形
+    const foot = [toScreen(f.x + 0.12, f.y + 0.12), toScreen(f.x + w - 0.12, f.y + 0.12), toScreen(f.x + w - 0.12, f.y + h - 0.12), toScreen(f.x + 0.12, f.y + h - 0.12)];
+    v.shadow.poly(foot.flatMap((p) => [p.x - c.x, p.y - c.y])).fill({ color: 0x000000, alpha: 0.1 });
+    const sleeper = lying ? { hair: hex(lying.d.appearance.hair), skin: hex(lying.d.appearance.skin) } : undefined;
+    drawStandee(v.g, f.def, def.color, sw, sh, { on: !!f.state?.on, sleeper, foods });
+    // 朝向：rot=1 时左右镜像
+    v.g.scale.x = f.rot === 1 ? -1 : 1;
+    v.box.zIndex = (f.x + w / 2 + f.y + h / 2 - 1) * 10 + 1;
   }
 
   // ———————————————————— 每帧 ————————————————————
 
   update(t: number) {
+    if (this.camTarget) {
+      const k = 0.18, ct = this.camTarget;
+      this.zoom += (ct.zoom - this.zoom) * k;
+      this.camera.x += (ct.x - this.camera.x) * k;
+      this.camera.y += (ct.y - this.camera.y) * k;
+      this.camera.scale.set(this.zoom);
+      if (Math.abs(ct.zoom - this.zoom) < 0.002 && Math.abs(ct.x - this.camera.x) < 0.5 && Math.abs(ct.y - this.camera.y) < 0.5) this.camTarget = null;
+    }
     const w = this.game.world;
     if (w.version !== this.builtVersion || this.game.settings.wallMode !== this.builtWallMode) {
       this.rebuildStatic();
@@ -257,9 +380,12 @@ export class Scene {
       const p = toScreen(c.d.pos.x, c.d.pos.y);
       skin.view.position.set(p.x, p.y);
       const onTop = c.run?.phase === "act" && c.run.interaction?.onTop;
-      skin.view.zIndex = (c.d.pos.x + c.d.pos.y - 1) * 10 + (onTop ? 6 : 5);
+      skin.view.visible = !c.hidden;
+      // 坐在家具上时排在立牌后面，下半身被挡住，看起来就是坐着
+      skin.view.zIndex = (c.d.pos.x + c.d.pos.y - 1) * 10 + (onTop ? 0.5 : 5);
       this.updateBubble(c);
     }
+    this.applyFocus();
     this.drawGhost();
     this.drawTint();
   }

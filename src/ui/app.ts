@@ -38,6 +38,9 @@ export class UI {
   private typing = new Set<string>();
   private els: Record<string, HTMLElement> = {};
   onSelect?: (id: string | null) => void;
+  /** 视角切换：全景、某个房间、前后切换 */
+  onView?: (v: { mode: "all" } | { mode: "room"; name: string } | { mode: "step"; dir: 1 | -1 }) => void;
+  view: { mode: "all" } | { mode: "room"; name: string } = { mode: "all" };
   onSettingsChanged?: () => void;
 
   constructor(host: HTMLElement, private game: Game, private brain: Brain) {
@@ -49,6 +52,12 @@ export class UI {
         <div class="clock panel" id="clock"></div>
         <span class="chip" id="aistatus" role="button" tabindex="0" title="打开设置"></span>
         <div class="spacer"></div>
+        <div class="viewbar panel" id="viewbar">
+          <button class="btn small" id="v-all">全景</button>
+          <button class="btn small" id="v-prev" aria-label="上一个房间">◀</button>
+          <select class="btn small" id="v-room" aria-label="选择房间"></select>
+          <button class="btn small" id="v-next" aria-label="下一个房间">▶</button>
+        </div>
         <button class="btn" id="btn-walls" title="切换墙的显示方式"></button>
         <button class="btn" id="btn-build">建造</button>
         <button class="btn" id="btn-settings">设置</button>
@@ -59,7 +68,7 @@ export class UI {
       <div class="buildbar panel" id="buildbar" hidden></div>
       <div id="toast-host"></div>
       <div id="modal-host"></div>`;
-    for (const id of ["stage", "clock", "aistatus", "roster", "detail", "logbox", "buildbar", "toast-host", "modal-host", "btn-walls", "btn-build", "btn-settings"]) {
+    for (const id of ["stage", "clock", "aistatus", "roster", "detail", "logbox", "buildbar", "toast-host", "modal-host", "viewbar", "btn-walls", "btn-build", "btn-settings"]) {
       this.els[id] = host.querySelector("#" + id)! as HTMLElement;
     }
     this.stage = this.els.stage;
@@ -71,10 +80,28 @@ export class UI {
       this.renderTop();
     };
     game.onPlayerMessage((c, text) => this.toast(c, text));
+    const vb = this.els.viewbar;
+    vb.querySelector<HTMLElement>("#v-all")!.onclick = () => this.onView?.({ mode: "all" });
+    vb.querySelector<HTMLElement>("#v-prev")!.onclick = () => this.onView?.({ mode: "step", dir: -1 });
+    vb.querySelector<HTMLElement>("#v-next")!.onclick = () => this.onView?.({ mode: "step", dir: 1 });
+    const sel = vb.querySelector<HTMLSelectElement>("#v-room")!;
+    sel.onchange = () => (sel.value ? this.onView?.({ mode: "room", name: sel.value }) : this.onView?.({ mode: "all" }));
     this.renderAll();
   }
 
+  /** 视角条：全景时「全景」高亮，单间时下拉框显示当前房间 */
+  renderView() {
+    const vb = this.els.viewbar;
+    vb.querySelector("#v-all")!.className = "btn small" + (this.view.mode === "all" ? " active" : "");
+    const sel = vb.querySelector<HTMLSelectElement>("#v-room")!;
+    const cur = this.view.mode === "room" ? this.view.name : "";
+    const html = `<option value="">看单个房间…</option>` + this.game.world.rooms().map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    if (sel.innerHTML !== html) sel.innerHTML = html;
+    sel.value = cur;
+  }
+
   renderAll() {
+    this.renderView();
     this.renderTop();
     this.renderRoster();
     this.renderDetail();

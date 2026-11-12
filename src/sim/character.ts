@@ -25,6 +25,7 @@ export class Character {
   run: Running | null = null;
   pose: Pose = "stand";
   moving = false;
+  hidden = false; // 躺在床上、泡在浴缸里时，角色本身不画，由家具立牌画出「有人」
   back = false; // 朝向屏幕里面（往上走）
   speech: { text: string; until: number } | null = null;
   emote: { icon: string; until: number } | null = null;
@@ -318,6 +319,7 @@ export class Character {
         this.usingFurniture = f.uid;
         this.pose = it.pose;
         if (it.onTop) {
+          this.hidden = it.pose === "lie";
           run.returnTo = { ...this.tile };
           const c = this.game.world.centerOf(f);
           this.d.pos.x = c.x;
@@ -401,6 +403,7 @@ export class Character {
       this.d.pos.x = run.returnTo.x + 0.5;
       this.d.pos.y = run.returnTo.y + 0.5;
     }
+    this.hidden = false;
     this.pose = "stand";
     this.moving = false;
     if (!this.queue.length) this.d.activity = "发呆";
