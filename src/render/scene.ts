@@ -19,7 +19,11 @@ const STANDEE_H: Record<string, number> = {
 
 /** 立牌宽度：按占地的格数估算 */
 function standeeWidth(def: string, w: number, h: number) {
-  const thin: Record<string, number> = { lamp: 44, plant: 60, chair: 54, toilet: 58, medicine: 64 };
+  // 和占地格数不成比例的家具单独指定宽度（像素）
+  const thin: Record<string, number> = {
+    lamp: 44, plant: 60, chair: 54, toilet: 58, medicine: 64, lamp_desk: 54, plant_small: 58, plant_big: 84,
+    nightstand: 74, floor_cushion: 86, beanbag: 92, mirror_stand: 62, clothes_rack: 92, coffee_table: 150, dresser: 92,
+  };
   if (thin[def]) return thin[def];
   return 96 + (w - 1) * 118;
 }
@@ -351,6 +355,11 @@ export class Scene {
       const t = getTexture("furniture", `${name}_on`);
       if (t) return { tex: t, variant: "on" as const };
     }
+    // 背对镜头的家具用背面图；没有背面图时退回正面图
+    if (f.back) {
+      const tb = getTexture("furniture", `${name}_back`);
+      if (tb) return { tex: tb, variant: "base" as const };
+    }
     const t = getTexture("furniture", name);
     return t ? { tex: t, variant: "base" as const } : null;
   }
@@ -365,7 +374,7 @@ export class Scene {
     const foods = foodItems.map((x) => FOOD_COLORS[x.kind] ?? 0xf2a65a);
     const art = this.furnitureTexture(f, !!lying);
     const foodTex = foodItems.map((x) => getTexture("food", `food_${x.kind}`));
-    const stateKey = [f.x, f.y, f.rot, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
+    const stateKey = [f.x, f.y, f.rot, f.back ? 1 : 0, f.state?.on ? 1 : 0, lying?.id ?? "", foodItems.map((x) => x.kind).join(","), art?.tex.uid ?? 0, foodTex.map((t) => (t ? 1 : 0)).join("")].join("|");
     let v = this.furnitureViews.get(f.uid);
     if (v && v.stateKey === stateKey) return;
     if (!v) {

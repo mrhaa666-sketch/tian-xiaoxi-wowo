@@ -17,7 +17,8 @@ export interface FurnitureInst {
   def: string; // 家具定义 id
   x: number;
   y: number;
-  rot: 0 | 1; // 0 = 朝右下，1 = 朝左下（镜像）
+  rot: 0 | 1; // 0 = 正常占地，1 = 占地的长宽对调（横放/竖放）
+  back?: boolean; // 背对镜头摆放（用 <素材名>_back.png）
   state?: Record<string, string | number | boolean>;
 }
 

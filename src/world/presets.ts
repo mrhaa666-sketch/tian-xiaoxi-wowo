@@ -95,10 +95,13 @@ export function autoWalls(world: World, ox: number, oy: number, w: number, h: nu
 }
 
 /** 按坐标盖一个指定大小的房间（不自动开门），返回房间名 */
-function room(world: World, name: string, x: number, y: number, w: number, h: number, floor: string, style: string, furniture: { def: string; x: number; y: number; rot?: 0 | 1 }[] = []) {
+function room(world: World, name: string, x: number, y: number, w: number, h: number, floor: string, style: string, furniture: { def: string; x: number; y: number; rot?: 0 | 1; back?: boolean }[] = []) {
   for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) world.setFloor(x + dx, y + dy, floor, name);
   autoWalls(world, x, y, w, h, style);
-  for (const f of furniture) world.addFurniture(f.def, x + f.x, y + f.y, f.rot ?? 0);
+  for (const f of furniture) {
+    const inst = world.addFurniture(f.def, x + f.x, y + f.y, f.rot ?? 0);
+    if (inst && f.back) inst.back = true;
+  }
   return name;
 }
 
@@ -114,8 +117,9 @@ function room(world: World, name: string, x: number, y: number, w: number, h: nu
  */
 export function buildStarterHouse(world: World) {
   room(world, "客厅", 0, 0, 6, 5, "wood", "cream", [
-    { def: "bookshelf", x: 0, y: 0 }, { def: "tv", x: 2, y: 0 }, { def: "plant", x: 5, y: 0 },
-    { def: "rug", x: 2, y: 1 }, { def: "sofa", x: 2, y: 3 }, { def: "lamp", x: 5, y: 4 },
+    { def: "bookshelf", x: 0, y: 0 }, { def: "tv", x: 2, y: 0 }, { def: "plant_big", x: 5, y: 0 },
+    { def: "rug", x: 2, y: 1 }, { def: "coffee_table", x: 2, y: 2 }, { def: "sofa", x: 2, y: 3, back: true },
+    { def: "armchair", x: 4, y: 2 }, { def: "lamp", x: 5, y: 4 }, { def: "low_cabinet", x: 0, y: 4 },
   ]);
   room(world, "厨房", 6, 0, 4, 3, "tile", "sage", [
     { def: "fridge", x: 0, y: 0 }, { def: "stove", x: 1, y: 0 }, { def: "sink", x: 2, y: 0 },
@@ -124,8 +128,8 @@ export function buildStarterHouse(world: World) {
   room(world, "浴室", 6, 3, 3, 2, "tile", "sky", [{ def: "bathtub", x: 0, y: 0 }, { def: "medicine", x: 2, y: 0 }, { def: "toilet", x: 0, y: 1 }]);
   room(world, "书房", 9, 3, 3, 4, "mint", "sky", [{ def: "bookshelf", x: 0, y: 0 }, { def: "desk", x: 1, y: 0 }, { def: "chair", x: 1, y: 1 }, { def: "plant", x: 2, y: 3 }]);
   room(world, "走廊", 0, 5, 9, 1, "wood", "cream");
-  room(world, "卧室A", 0, 6, 4, 4, "carpet", "peach", [{ def: "bed", x: 2, y: 1, rot: 1 }, { def: "wardrobe", x: 3, y: 0 }, { def: "lamp", x: 0, y: 2 }, { def: "plant", x: 3, y: 3 }]);
-  room(world, "卧室B", 4, 6, 5, 4, "carpet", "lilac", [{ def: "wardrobe", x: 0, y: 0 }, { def: "bed", x: 3, y: 0, rot: 1 }, { def: "lamp", x: 1, y: 0 }, { def: "rug", x: 1, y: 2 }, { def: "plant", x: 4, y: 3 }]);
+  room(world, "卧室A", 0, 6, 4, 4, "carpet", "peach", [{ def: "bed", x: 2, y: 1, rot: 1 }, { def: "nightstand", x: 1, y: 1 }, { def: "wardrobe", x: 3, y: 0 }, { def: "dresser", x: 0, y: 3 }, { def: "plant_small", x: 3, y: 3 }]);
+  room(world, "卧室B", 4, 6, 5, 4, "carpet_lilac", "lilac", [{ def: "wardrobe", x: 0, y: 0 }, { def: "lamp_desk", x: 1, y: 0 }, { def: "bed_double", x: 3, y: 0 }, { def: "floor_cushion", x: 1, y: 2 }, { def: "beanbag", x: 0, y: 3 }, { def: "mirror_stand", x: 2, y: 3 }, { def: "plant_big", x: 4, y: 3 }]);
   for (let x = 0; x < 12; x++) for (let y = 10; y < 12; y++) world.setFloor(x, y, "grass", "院子");
   for (let x = 9; x < 12; x++) for (let y = 7; y < 10; y++) world.setFloor(x, y, "grass", "院子");
   autoWalls(world, 0, 0, 12, 12, "cream");

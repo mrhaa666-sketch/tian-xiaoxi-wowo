@@ -319,6 +319,8 @@ export class Character {
         this.pose = it.pose;
         if (it.onTop) {
           this.hidden = it.pose === "lie";
+          // 坐在背对镜头的沙发/椅子上：看到的是角色的背影
+          this.back = !!f.back;
           run.returnTo = { ...this.tile };
           const c = this.game.world.centerOf(f);
           this.d.pos.x = c.x;
@@ -404,6 +406,7 @@ export class Character {
       this.d.pos.y = run.returnTo.y + 0.5;
     }
     this.hidden = false;
+    this.back = false;
     this.pose = "stand";
     this.moving = false;
     if (!this.queue.length) this.d.activity = "发呆";
