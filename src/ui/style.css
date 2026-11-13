@@ -326,3 +326,13 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .ai-card .btn { width: 100%; }
 /* 长按画面时不要弹出系统菜单、不要选中文字 */
 #stage canvas, .stage canvas { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; }
+.perm-intro { font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
+.perm-list { display: grid; gap: 10px; margin-bottom: 18px; }
+.perm-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 12px; border-radius: 14px; background: var(--card, #faf6fb); border: 1px solid var(--line, #e5e0ea); }
+.perm-row.ok { opacity: .75; }
+.perm-state { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #ffe3e3; color: #d9534f; }
+.perm-row.ok .perm-state { background: #dcf5e6; color: #2f9e5b; }
+.perm-text { display: grid; gap: 3px; min-width: 0; }
+.perm-text span { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.perm-ok { font-size: 12px; color: #2f9e5b; font-weight: 700; }
+.perm-btns { grid-column: 2 / 4; display: flex; gap: 8px; }

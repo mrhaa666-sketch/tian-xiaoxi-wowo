@@ -15,6 +15,7 @@ import { scoreOptions } from "../sim/autonomy";
 import { cleanEntry, exportPack, importPack, type PackCharacter } from "../sim/pack";
 import { processUpload, type UploadResult } from "../render/upload";
 import { saveSprites, spriteUrl } from "../render/spriteStore";
+import type { PermissionApi } from "../platform/android";
 import { DEEPSEEK_BASE } from "../ai/provider";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -81,6 +82,10 @@ export class UI {
   onSettingsSaved?: () => void;
   /** 安卓版：请求不被省电策略限制，返回是否已允许 */
   requestBatteryExemption?: () => Promise<boolean>;
+  /** 安卓版：后台权限的检查和申请 */
+  permissions?: PermissionApi;
+  /** 后台权限引导页打开时，回到应用后刷新状态 */
+  refreshPermissionGuide?: () => void;
   /** 底部抽屉打开/关闭后，画面要重新排版 */
   onLayout?: () => void;
   /** 户型应用到房子之后 */
@@ -483,6 +488,71 @@ export class UI {
   }
 
   // ———————————————————— 聊天（全屏页面） ————————————————————
+
+  /**
+   * 后台权限引导（安卓版）：逐项检查，能弹系统窗口的直接弹，不能弹的跳到对应的系统设置页。
+   * first = 第一次打开应用时自动弹出。
+   */
+  openPermissionGuide(first: boolean) {
+    const api = this.permissions;
+    if (!api) return;
+    const brandTip = (m: string) =>
+      /xiaomi|redmi|poco/.test(m) ? "小米 / 红米：打开「自启动」，再到「省电策略」里选「无限制」。"
+      : /huawei|honor/.test(m) ? "华为 / 荣耀：在「应用启动管理」里把它改成「手动管理」，三个开关（自启动、关联启动、后台活动）都打开。"
+      : /oppo|realme|oneplus/.test(m) ? "OPPO / 一加 / realme：打开「自启动」，再到「耗电管理」里允许「后台运行」。"
+      : /vivo|iqoo/.test(m) ? "vivo / iQOO：在「后台高耗电」里允许它，再打开「自启动」。"
+      : /samsung/.test(m) ? "三星：在「电池」里把它设成「不受限制」。"
+      : /meizu/.test(m) ? "魅族：在「后台管理」里允许它后台运行。"
+      : "在系统设置里找到这个应用，打开「自启动」并允许「后台运行」（不同手机叫法不一样）。";
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>后台权限</h2></header>
+      <div class="page-body">
+        <p class="perm-intro">${first ? "欢迎来到窝窝！" : ""}想让家里的人在你不看手机的时候也照常生活、给你发消息，需要开几项权限。能直接开的点一下就好，其余的会带你去系统设置。</p>
+        <div class="perm-list" id="perm-list"><div class="help">正在检查…</div></div>
+        <button class="btn primary block" id="perm-done">${first ? "好了，开始吧" : "完成"}</button>
+      </div>`, () => { this.refreshPermissionGuide = undefined; });
+    let autostartDone = false;
+    try { autostartDone = localStorage.getItem("wowo-autostart") === "1"; } catch { /* 无所谓 */ }
+    const render = async () => {
+      const st = await api.status().catch(() => null);
+      const box = p.querySelector<HTMLElement>("#perm-list");
+      if (!st || !box) return;
+      const row = (id: string, ok: boolean, title: string, desc: string, btn: string) => `
+        <div class="perm-row ${ok ? "ok" : ""}">
+          <span class="perm-state">${ok ? "✓" : "!"}</span>
+          <div class="perm-text"><b>${title}</b><span>${desc}</span></div>
+          ${ok ? `<span class="perm-ok">已开启</span>` : `<button class="btn small primary" data-perm="${id}">${btn}</button>`}
+        </div>`;
+      box.innerHTML = [
+        row("notify", st.notifications, "通知", "角色给你发的消息会变成手机通知。", "开启"),
+        row("battery", st.battery, "不受省电限制", "系统省电时不会把窝窝关掉。会弹出系统窗口，选「允许」。", "开启"),
+        st.sdk >= 31 ? row("exact", st.exactAlarm, "准时提醒", "到点的消息能准时送到。会打开系统设置，把开关打开。", "去设置") : "",
+        autostartDone
+          ? row("autostart", true, "自启动和后台运行", brandTip(st.manufacturer), "")
+          : `<div class="perm-row">
+              <span class="perm-state">!</span>
+              <div class="perm-text"><b>自启动和后台运行</b><span>${brandTip(st.manufacturer)}这一项系统不让应用直接检查，设置好以后点「我已设置好」。</span></div>
+              <span></span>
+              <div class="perm-btns"><button class="btn small primary" data-perm="autostart">去设置</button><button class="btn small" data-perm="autostart-done">我已设置好</button></div>
+            </div>`,
+      ].join("");
+      box.querySelectorAll<HTMLElement>("[data-perm]").forEach((b) => (b.onclick = async () => {
+        const k = b.dataset.perm!;
+        if (k === "notify") await api.requestNotifications();
+        else if (k === "battery") await api.requestBattery();
+        else if (k === "exact") await api.openExactAlarm();
+        else if (k === "autostart") { const opened = await api.openAutostart(); if (!opened) this.flash("没找到自启动页面，已打开应用详情，请在里面找「自启动」或「电池」"); }
+        else if (k === "autostart-done") { autostartDone = true; try { localStorage.setItem("wowo-autostart", "1"); } catch { /* 无所谓 */ } }
+        setTimeout(() => void render(), 600);
+      }));
+    };
+    this.refreshPermissionGuide = () => void render();
+    void render();
+    p.querySelector<HTMLElement>("#perm-done")!.onclick = () => {
+      try { localStorage.setItem("wowo-perm-guide", "1"); } catch { /* 无所谓 */ }
+      p.close();
+    };
+  }
 
   /** 发消息：可以发给全体、选几个人，或者只发给一个人（只选一个人时直接进聊天） */
   openMessage(preselect?: string[]) {
@@ -992,7 +1062,7 @@ export class UI {
           <div class="field"><label for="s-qe">到几点</label><input id="s-qe" type="number" inputmode="numeric" min="0" max="23" value="${s.phone.quietEnd}" /></div>
         </div>
         <div class="help">两个数一样表示不设免打扰。</div>
-        ${this.requestBatteryExemption ? `<button type="button" class="btn block" id="s-battery">允许后台运行不受省电限制</button><div class="help">有些手机会为了省电把后台应用关掉，点这里在系统设置里放行。</div>` : ""}
+        ${this.permissions ? `<button type="button" class="btn block" id="s-perm">后台权限设置</button><div class="help">检查通知、省电限制、准时提醒、自启动这些权限有没有开好。</div>` : ""}
         <h3 class="group">画面和测试</h3>
         <label class="switch"><input type="checkbox" id="s-walls" ${s.wallMode === "full" ? "checked" : ""} /><span>房间之间的墙显示成高墙</span></label>
         <div class="field"><label for="s-hour">画面时间</label>
@@ -1027,10 +1097,7 @@ export class UI {
         if (!/^deepseek/.test(chat.value)) chat.value = "deepseek-chat";
       }
     };
-    p.querySelector<HTMLElement>("#s-battery")?.addEventListener("click", async () => {
-      const ok = await this.requestBatteryExemption?.();
-      this.flash(ok ? "已经允许了" : "请在打开的系统页面里选择「允许」");
-    });
+    p.querySelector<HTMLElement>("#s-perm")?.addEventListener("click", () => this.openPermissionGuide(false));
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
     $("#s-save").onclick = () => {
       ai.provider = $<HTMLSelectElement>("#s-provider").value as typeof ai.provider;

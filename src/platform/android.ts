@@ -14,6 +14,20 @@ interface KeepAlivePlugin {
   start(opts: { title: string; text: string }): Promise<void>;
   stop(): Promise<void>;
   requestIgnoreBatteryOptimizations(): Promise<{ granted: boolean }>;
+  status(): Promise<PermStatus>;
+  openExactAlarmSettings(): Promise<{ opened: boolean }>;
+  openNotificationSettings(): Promise<{ opened: boolean }>;
+  openAutostartSettings(): Promise<{ opened: boolean }>;
+}
+export interface PermStatus { notifications: boolean; battery: boolean; exactAlarm: boolean; manufacturer: string; sdk: number }
+
+/** 给「后台权限」引导页用的操作 */
+export interface PermissionApi {
+  status(): Promise<PermStatus>;
+  requestNotifications(): Promise<void>;
+  requestBattery(): Promise<void>;
+  openExactAlarm(): Promise<void>;
+  openAutostart(): Promise<boolean>;
 }
 const KeepAlive = registerPlugin<KeepAlivePlugin>("KeepAlive");
 
@@ -90,6 +104,21 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
   await syncKeepAlive();
   ui.onSettingsSaved = () => { void syncKeepAlive(); };
   ui.requestBatteryExemption = () => KeepAlive.requestIgnoreBatteryOptimizations().then((r) => r.granted).catch(() => false);
+  ui.permissions = {
+    status: () => KeepAlive.status(),
+    requestNotifications: async () => {
+      const r = await LocalNotifications.requestPermissions().catch(() => ({ display: "denied" }));
+      // 以前点过「不允许」，系统不会再弹窗：直接打开通知设置页
+      if (r.display !== "granted") await KeepAlive.openNotificationSettings().catch(() => {});
+    },
+    requestBattery: async () => { await KeepAlive.requestIgnoreBatteryOptimizations().catch(() => {}); },
+    openExactAlarm: async () => { await KeepAlive.openExactAlarmSettings().catch(() => {}); },
+    openAutostart: () => KeepAlive.openAutostartSettings().then((r) => r.opened).catch(() => false),
+  };
+  // 第一次打开：主动带主人把后台权限都开好
+  let guided = false;
+  try { guided = localStorage.getItem("wowo-perm-guide") === "1"; } catch { /* 读不了就当没看过 */ }
+  if (!guided) setTimeout(() => ui.openPermissionGuide(true), 1200);
 
   // —— 切到后台 / 回到前台 ——
   const takeInbox = async () => {
@@ -110,7 +139,7 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
   await takeInbox();
   await App.addListener("appStateChange", async ({ isActive }) => {
     game.playerWatching = isActive;
-    if (isActive) await takeInbox();
+    if (isActive) { await takeInbox(); ui.refreshPermissionGuide?.(); }
     else { game.save(); await syncRunner("sync"); }
   });
 
