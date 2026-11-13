@@ -311,3 +311,16 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .import-card .btn { width: 100%; }
 .or-line { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
 .or-line::before, .or-line::after { content: ""; flex: 1; height: 1px; background: var(--line, #e5e0ea); }
+.look-card { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 16px; background: var(--card, #faf6fb); border: 1px solid var(--line, #e5e0ea); margin-bottom: 12px; }
+.look-preview { flex: none; width: 84px; height: 84px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: repeating-conic-gradient(#f1ecf3 0 25%, #fff 0 50%) 0 0 / 14px 14px; box-shadow: 0 0 0 3px #fff, 0 0 0 4px var(--line, #e5e0ea); }
+.look-preview img { width: 100%; height: 100%; object-fit: cover; }
+.look-preview span { font-size: 11px; color: var(--muted); text-align: center; padding: 6px; }
+.look-side { display: grid; gap: 6px; min-width: 0; }
+.look-side span { font-size: 12px; color: var(--muted); }
+.file-btn { justify-self: start; cursor: pointer; }
+.look-side .check { font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.ai-card { display: grid; gap: 8px; padding: 14px; border-radius: 16px; background: linear-gradient(135deg, #f3ecff, #ffeef5); margin-bottom: 14px; }
+.ai-card b { font-size: 15px; }
+.ai-card > span { font-size: 12px; color: var(--muted); }
+.ai-card textarea { min-height: 64px; }
+.ai-card .btn { width: 100%; }

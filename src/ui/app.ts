@@ -12,8 +12,9 @@ import { ROOM_PRESETS } from "../world/presets";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
 import { scoreOptions } from "../sim/autonomy";
-import { exportPack, importPack } from "../sim/pack";
-import { spriteUrl } from "../render/spriteStore";
+import { cleanEntry, exportPack, importPack, type PackCharacter } from "../sim/pack";
+import { processUpload, type UploadResult } from "../render/upload";
+import { saveSprites, spriteUrl } from "../render/spriteStore";
 import { DEEPSEEK_BASE } from "../ai/provider";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -725,6 +726,32 @@ export class UI {
     if (this.chatOpen === c.id) this.renderChatLog();
   }
 
+  /** 把一份角色设定（AI 生成的）填进人设编辑页 */
+  private fillEditor(p: HTMLElement, e: PackCharacter) {
+    const set = (id: string, v: string | number | undefined) => { const el = p.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(id); if (el && v !== undefined) el.value = String(v); };
+    const nameEl = p.querySelector<HTMLInputElement>("#e-name")!;
+    if (!nameEl.value.trim()) nameEl.value = e.name;
+    set("#e-persona", e.persona); set("#e-schedule", e.schedule);
+    const pr = e.profile ?? {};
+    set("#e-age", pr.age); set("#e-bday", pr.birthday ? `2000-${pr.birthday}` : undefined); set("#e-job", pr.job); set("#e-hobby", pr.hobbies);
+    if (pr.likes || pr.dislikes) p.querySelectorAll<HTMLElement>(".taste-chip[data-food]").forEach((b) => {
+      b.classList.remove("like", "dislike");
+      if (pr.likes?.includes(b.dataset.food!)) b.classList.add("like"); else if (pr.dislikes?.includes(b.dataset.food!)) b.classList.add("dislike");
+    });
+    for (const [k, v] of Object.entries(e.traits ?? {})) set(`[data-trait="${k}"]`, v);
+    const l = e.lore ?? {};
+    set("#l-self", l.selfName); set("#l-call", l.callPlayer); set("#l-speech", l.speechStyle); set("#l-catch", l.catchphrases?.join("、"));
+    set("#l-back", l.backstory); set("#l-goals", l.goals); set("#l-fears", l.fears); set("#l-lt", l.likesTopics); set("#l-dt", l.dislikesTopics);
+    set("#l-habits", l.habits); set("#l-chrono", l.chronotype); set("#l-sick", l.sickBehavior); set("#l-conflict", l.conflictStyle);
+    if (l.favoriteRoom) {
+      const room = p.querySelector<HTMLSelectElement>("#l-room")!;
+      if (![...room.options].some((o) => o.value === l.favoriteRoom)) room.add(new Option(l.favoriteRoom, l.favoriteRoom));
+      room.value = l.favoriteRoom;
+    }
+    if (l.favoriteFurniture) p.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => b.classList.toggle("like", l.favoriteFurniture!.includes(b.dataset.fav!)));
+    p.querySelector<HTMLDetailsElement>("details.more")!.open = true;
+  }
+
   openEditor(c: Character | null) {
     const d: CharacterData = c ? c.d : newCharacter({ name: "", appearance: randomAppearance() });
     const a = d.appearance;
@@ -738,7 +765,23 @@ export class UI {
           <button type="button" class="btn primary" id="e-import">从角色包导入</button>
           ${this.localPacks.length ? `<div class="local-packs">${this.localPacks.map((x, i) => `<button type="button" class="btn small" data-elocal="${i}">＋ ${esc(x.name)}</button>`).join("")}</div>` : ""}
         </div>
-        <div class="or-line"><span>或者自己写一个</span></div>`}
+        <div class="or-line"><span>或者自己做一个</span></div>`}
+        <div class="look-card">
+          <div class="look-preview" id="e-look">${d.sprites ? `<img alt="" src="${spriteUrl(d.sprites, "avatar_normal.png")}">` : `<span>还没有形象</span>`}</div>
+          <div class="look-side">
+            <b>形象</b>
+            <span id="e-look-help">${d.sprites ? "已经有立绘了，上传新图片会替换掉。" : "上传一张角色的图片，就会用它在家里走来走去。最好是全身、背景透明的图。"}</span>
+            <label class="btn small primary file-btn">上传图片<input type="file" id="e-image" accept="image/*" hidden /></label>
+            <label class="check"><input type="checkbox" id="e-nobg" /> 去掉纯色背景</label>
+          </div>
+        </div>
+        <div class="ai-card">
+          <b>让 AI 帮你写设定</b>
+          <span>告诉 AI 你想做谁，它会写好人设、作息、性格和更多设定，填进下面的表格，你再改。</span>
+          <textarea id="e-ai-ask" placeholder="例如：《世界计划》里的宵崎奏；或者：一个爱睡懒觉、嘴硬心软的猫系大学生"></textarea>
+          <button type="button" class="btn primary" id="e-ai-go">生成设定</button>
+          <div class="help" id="e-ai-status">${this.brain.hasAI ? "" : "需要先在「设置」里接上 AI（Claude、DeepSeek 等）才能用。"}</div>
+        </div>
         <div class="field"><label for="e-name">名字</label><input id="e-name" value="${esc(d.name)}" maxlength="12" /></div>
         <div class="field"><label for="e-persona">性格 / 人设</label>
           <div class="help">AI 会按这段文字来扮演 TA。写得越具体，TA 越像一个真实的人：年龄职业、性格、说话方式、喜好、和其他人的关系。</div>
@@ -811,8 +854,44 @@ export class UI {
       }));
     }
     p.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => (b.onclick = () => b.classList.toggle("like")));
+    // —— 上传图片 ——
+    let upload: UploadResult | null = null;
+    const runUpload = async () => {
+      const f = $<HTMLInputElement>("#e-image").files?.[0];
+      if (!f) return;
+      $("#e-look-help").textContent = "正在处理图片…";
+      try {
+        upload = await processUpload(f, $<HTMLInputElement>("#e-nobg").checked);
+        $("#e-look").innerHTML = `<img alt="" src="${upload.preview}">`;
+        $("#e-look-help").textContent = "好了。只有一张图时，TA 的心情会用头顶的小标记表示，比如开心时冒出带爱心的气泡、生气时出现红色的青筋。";
+      } catch {
+        $("#e-look-help").textContent = "这张图片读不出来，换一张试试。";
+      }
+    };
+    $<HTMLInputElement>("#e-image").onchange = runUpload;
+    $<HTMLInputElement>("#e-nobg").onchange = () => { if ($<HTMLInputElement>("#e-image").files?.length) void runUpload(); };
+    // —— 让 AI 写设定 ——
+    let aiSkills: Partial<Skills> | null = null;
+    $("#e-ai-go").onclick = async () => {
+      const ask = $<HTMLTextAreaElement>("#e-ai-ask").value.trim();
+      const status = $("#e-ai-status");
+      if (!ask) { $<HTMLTextAreaElement>("#e-ai-ask").focus(); return; }
+      if (!this.brain.hasAI) { status.textContent = "需要先在「设置」里接上 AI（Claude、DeepSeek 等）才能用。"; return; }
+      const btn = $<HTMLButtonElement>("#e-ai-go");
+      btn.disabled = true; btn.textContent = "生成中…"; status.textContent = "AI 正在写，大概要十几秒到一分钟。";
+      try {
+        const raw = await this.brain.generateCharacter(ask);
+        const e = cleanEntry((raw ?? {}) as Record<string, unknown>);
+        if (!e) throw new Error("AI 没有给出角色");
+        this.fillEditor(p, e);
+        aiSkills = e.skills ?? null;
+        status.textContent = "写好了，往下看看，不满意的地方直接改。";
+      } catch (err) {
+        status.textContent = `没有生成成功：${err instanceof Error ? err.message : String(err)}`;
+      } finally { btn.disabled = false; btn.textContent = "重新生成"; }
+    };
     if (c) $("#e-export").onclick = () => this.downloadPack([c.d], c.name);
-    p.querySelectorAll<HTMLElement>(".taste-chip").forEach((b) => (b.onclick = () => {
+    p.querySelectorAll<HTMLElement>(".taste-chip[data-food]").forEach((b) => (b.onclick = () => {
       const st = b.classList.contains("like") ? "dislike" : b.classList.contains("dislike") ? "" : "like";
       b.classList.remove("like", "dislike");
       if (st) b.classList.add(st);
@@ -830,9 +909,10 @@ export class UI {
       d.profile.birthday = bd ? bd.slice(5) : "";
       d.profile.job = $<HTMLInputElement>("#e-job").value.trim();
       d.profile.hobbies = $<HTMLInputElement>("#e-hobby").value.trim();
-      d.profile.likes = [...p.querySelectorAll<HTMLElement>(".taste-chip.like")].map((x) => x.dataset.food!);
-      d.profile.dislikes = [...p.querySelectorAll<HTMLElement>(".taste-chip.dislike")].map((x) => x.dataset.food!);
+      d.profile.likes = [...p.querySelectorAll<HTMLElement>(".taste-chip[data-food].like")].map((x) => x.dataset.food!);
+      d.profile.dislikes = [...p.querySelectorAll<HTMLElement>(".taste-chip[data-food].dislike")].map((x) => x.dataset.food!);
       p.querySelectorAll<HTMLInputElement>("[data-trait]").forEach((i) => (d.traits[i.dataset.trait as keyof Traits] = Number(i.value)));
+      if (aiSkills) d.skills = { ...d.skills, ...aiSkills };
       const v = (id: string) => $<HTMLInputElement>(id).value.trim();
       l.selfName = v("#l-self"); l.callPlayer = v("#l-call"); l.speechStyle = v("#l-speech");
       l.catchphrases = v("#l-catch").split(/[、,，\n]+/).map((x) => x.trim()).filter(Boolean).slice(0, 10);
@@ -850,6 +930,10 @@ export class UI {
         const o = this.game.chars.find((x) => x.name === r.name && x.d !== d);
         const cur = o && d.relations[o.id];
         if (o && (!cur || (cur.affinity === 0 && cur.note === "刚认识"))) d.relations[o.id] = { affinity: r.affinity, note: r.note };
+      }
+      if (upload) {
+        const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        void saveSprites(id, upload.files).then(() => { d.sprites = id; this.renderAll(); this.game.save(); });
       }
       p.close();
       if (c) {

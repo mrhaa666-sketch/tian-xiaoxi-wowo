@@ -240,3 +240,58 @@ export function buildContext(game: Game, c: Character, events: GameEvent[]) {
   }
   return lines.join("\n\n");
 }
+
+// ———————————————————— 让 AI 帮忙做角色 ————————————————————
+
+const str = { type: "string" };
+const int = { type: "integer" };
+const strArr = { type: "array", items: str };
+export const CHARACTER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    name: str,
+    persona: str,
+    schedule: str,
+    profile: {
+      type: "object", additionalProperties: false,
+      properties: { age: int, birthday: str, job: str, hobbies: str, likes: strArr, dislikes: strArr },
+      required: ["age", "birthday", "job", "hobbies", "likes", "dislikes"],
+    },
+    traits: {
+      type: "object", additionalProperties: false,
+      properties: { extraversion: int, conscientiousness: int, agreeableness: int, neuroticism: int, openness: int },
+      required: ["extraversion", "conscientiousness", "agreeableness", "neuroticism", "openness"],
+    },
+    skills: {
+      type: "object", additionalProperties: false,
+      properties: { cooking: int, music: int, art: int, gaming: int, study: int, fitness: int },
+      required: ["cooking", "music", "art", "gaming", "study", "fitness"],
+    },
+    lore: {
+      type: "object", additionalProperties: false,
+      properties: {
+        selfName: str, callPlayer: str, speechStyle: str, catchphrases: strArr, backstory: str, goals: str, fears: str,
+        likesTopics: str, dislikesTopics: str, habits: str,
+        chronotype: { type: "string", enum: ["early", "normal", "night"] },
+        sickBehavior: { type: "string", enum: ["rest", "stubborn", "clingy", "normal"] },
+        conflictStyle: str, favoriteRoom: str, favoriteFurniture: strArr,
+      },
+      required: ["selfName", "callPlayer", "speechStyle", "catchphrases", "backstory", "goals", "fears", "likesTopics", "dislikesTopics", "habits", "chronotype", "sickBehavior", "conflictStyle", "favoriteRoom", "favoriteFurniture"],
+    },
+  },
+  required: ["name", "persona", "schedule", "profile", "traits", "skills", "lore"],
+};
+
+export const CHARACTER_SYSTEM = `你在帮玩家给生活模拟游戏「恬小溪窝窝」设计一个住进家里的角色。玩家会告诉你想做谁：可能是已有作品里的角色，也可能只是一段描述。
+
+要求：
+1. 如果是已有作品里的角色，按原作的性格、经历、说话方式和人际关系来写，不要编造和原作矛盾的设定；原作里没有的细节（作息、口味、喜欢的家具）按性格合理推断。如果你不确定原作内容，就按玩家的描述来写，并把不确定的地方写得保守一些。
+2. 只描述，不要照抄原作台词；口头禅写 1～3 句简短、符合角色的话。
+3. persona 是给 AI 扮演用的人设正文，150～300 字：身份、性格、说话方式、在意的人和事、在家里会是什么样子。
+4. schedule 每行一条「HH:MM 事情」，6～10 行，符合角色的生活节奏。事情尽量用游戏里有的活动：起床、吃饭、工作、学习、看书、打游戏、做饭、画画、作曲、弹琴、看电视、洗澡、泡澡、睡觉等。
+5. profile.birthday 用「MM-DD」，不知道就留空字符串。likes / dislikes 只能从给你的食物 id 里选。
+6. traits 是 0～100 的性格分数：extraversion 外向、conscientiousness 认真、agreeableness 随和、neuroticism 敏感、openness 好奇。skills 是 0～10 的技能等级。
+7. lore.favoriteRoom 只能从给你的房间名里选（没有合适的就留空），favoriteFurniture 只能从给你的家具 id 里选 1～3 个。
+8. lore.callPlayer 是角色怎么称呼玩家，按角色性格来（比如「你」「主人」「前辈」）。
+9. 全部用简体中文。`;

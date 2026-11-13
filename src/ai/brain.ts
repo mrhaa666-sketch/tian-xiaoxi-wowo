@@ -7,7 +7,8 @@ import type { Character } from "../sim/character";
 import { clamp } from "../sim/character";
 import type { Game, GameEvent } from "../sim/game";
 import { mockChat, mockDecide, type Decision } from "./mock";
-import { CHAT_SCHEMA, CHAT_SYSTEM, DECISION_SCHEMA, DECISION_SYSTEM, buildContext } from "./prompts";
+import { CHARACTER_SCHEMA, CHARACTER_SYSTEM, CHAT_SCHEMA, CHAT_SYSTEM, DECISION_SCHEMA, DECISION_SYSTEM, buildContext } from "./prompts";
+import { FOODS, FURNITURE } from "../world/catalog";
 import { AIError, makeLLM, type LLM } from "./provider";
 
 export type AIStatus = { mode: "mock" | "online" | "error"; message: string; callsLastMinute: number; thinking: number };
@@ -235,6 +236,24 @@ export class Brain {
   }
 
   /** 主人和角色聊天 */
+  /** AI 有没有接上（本地模拟模式下不能用 AI 生成角色） */
+  get hasAI() { return !!this.llm; }
+
+  /** 让 AI 按玩家的描述生成一整套角色设定（返回未清洗的原始数据，由调用方清洗） */
+  async generateCharacter(request: string): Promise<unknown> {
+    if (!this.llm) throw new AIError("还没有接上 AI：先在「设置」里选 AI 服务并填上 API Key", "auth");
+    const foods = FOODS.filter((f) => !["birthday_cake", "tangyuan", "zongzi", "mooncake"].includes(f.id)).map((f) => `${f.id}=${f.name}`).join("、");
+    const furn = FURNITURE.filter((f) => f.interactions.some((i) => i.id !== "toggle")).map((f) => `${f.id}=${f.name}`).join("、");
+    const rooms = this.game.world.rooms().join("、");
+    return this.llm.complete({
+      tier: "chat",
+      system: CHARACTER_SYSTEM,
+      maxTokens: 4000,
+      schema: CHARACTER_SCHEMA,
+      messages: [{ role: "user", content: `玩家想做的角色：${request}\n\n可选的食物 id：${foods}\n可选的家具 id：${furn}\n家里的房间：${rooms}` }],
+    });
+  }
+
   async chat(c: Character, text: string): Promise<string> {
     const g = this.game;
     c.d.chat.push({ t: Date.now(), from: "player", text });

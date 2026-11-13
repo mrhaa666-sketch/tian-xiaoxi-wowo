@@ -65,6 +65,9 @@ export function newCharacter(partial: Partial<CharacterData> & { name: string })
 /** 补齐缺少的字段（旧存档、新加的变量） */
 export function normalizeCharacter(d: CharacterData): CharacterData {
   d.profile = { ...defaultProfile(), ...d.profile };
+  // 以前的版本保存口味时可能混进空值
+  d.profile.likes = d.profile.likes.filter(Boolean);
+  d.profile.dislikes = d.profile.dislikes.filter(Boolean);
   d.lore = { ...defaultLore(), ...d.lore };
   d.traits = { ...defaultTraits(), ...d.traits };
   d.skills = { ...defaultSkills(), ...d.skills };

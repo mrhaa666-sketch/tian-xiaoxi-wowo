@@ -1,6 +1,7 @@
 // 角色的画法。现在是代码画的占位 Q 版小人；
 // 以后接入「零件 + 骨骼」的角色包时，实现同样的 CharSkin 接口替换掉 ProceduralSkin 即可。
-import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
+import { drawMoodMark } from "./moodmarks";
 import { spriteUrl } from "./spriteStore";
 import type { Character } from "../sim/character";
 import { hex, shade } from "./iso";
@@ -137,6 +138,10 @@ export interface SpriteManifest {
   // 整图方式：每个状态直接对应一张完整的图（tools/sd-finished.mjs）
   frames?: Record<string, string>;
   poses?: string[];
+  /** 只有一张图（上传的图片）：心情用情绪标记表示 */
+  single?: boolean;
+  /** 头的右上角在图上的位置（像素），情绪标记画在这里 */
+  head?: { x: number; y: number; size: number };
   avatar: Record<string, string>;
 }
 
@@ -166,6 +171,8 @@ export class SpriteSkin implements CharSkin {
   private loading = new Set<string>();
   private nextBlink = 0;
   private current = "";
+  private marks = new Graphics();
+  private markText = new Text({ text: "", resolution: 3, style: { fontFamily: "ZCOOL KuaiLe, Noto Sans SC, sans-serif", fontWeight: "900", fontSize: 20, fill: 0xffffff } });
 
   constructor(public spritesId: string) {
     this.shadow.ellipse(0, 0, 26, 10).fill({ color: 0x000000, alpha: 0.18 });
@@ -180,7 +187,7 @@ export class SpriteSkin implements CharSkin {
       void this.tex(first).then(() => {
         this.view.removeChild(this.fallback.view);
         this.fallback.view.destroy({ children: true });
-        this.view.addChild(this.shadow, this.sprite);
+        this.view.addChild(this.shadow, this.sprite, this.marks, this.markText);
       });
     });
   }
@@ -224,6 +231,24 @@ export class SpriteSkin implements CharSkin {
       if (tx) { this.sprite.texture = tx; this.current = key; } else void this.tex(key);
     }
     this.pose(c, t);
+    this.drawMarks(c, t, m, emo, speaking);
+  }
+
+  /** 没有这种表情的图时，在头的右上角画情绪标记 */
+  private drawMarks(c: Character, t: number, m: SpriteManifest, emo: string, speaking: boolean) {
+    const f = m.frames;
+    const need = !!f && emo !== "normal" && (m.single || !f[emo]) && !speaking;
+    if (!need) { this.marks.clear(); this.markText.visible = false; return; }
+    const s = Math.abs(this.sprite.scale.y), flip = Math.sign(this.sprite.scale.x) || 1;
+    const hd = m.head ?? { x: m.width * 0.72, y: m.height * 0.06, size: m.width * 0.6 };
+    // 不管角色朝哪边，标记都放在头的右上角
+    const headCx = (hd.x - hd.size * 0.38 - m.footX) * s * flip;
+    const x = headCx + hd.size * 0.42 * s, y = (hd.y - m.footY) * s + this.sprite.y;
+    this.marks.position.set(x, y);
+    this.markText.position.set(0, 0);
+    drawMoodMark(this.marks, this.markText, emo, t, 20);
+    // 文字（Zzz、!）的位置是相对标记原点算的
+    this.markText.x += x; this.markText.y += y;
   }
 
   /** 身体 × 表情合成出来的立绘：挑姿势和表情 */

@@ -72,7 +72,7 @@ function cleanSprites(v: unknown): PackCharacter["sprites"] {
 }
 
 /** 把一个角色条目整理成安全的数据：类型不对、超出范围的值都丢掉或截断 */
-function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
+export function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
   const name = str(e.name, 20)?.trim();
   if (!name) return null;
   const p = (e.profile ?? {}) as Record<string, unknown>;
