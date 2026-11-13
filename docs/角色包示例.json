@@ -1,55 +1,168 @@
 {
-  "format": "wowo-character-pack",
-  "version": 1,
-  "characters": [
-    {
-      "name": "林栖",
-      "persona": "24 岁的夜班书店店员，安静、观察力强，话不多但每句都很认真。不擅长拒绝别人，累了也不太会说。喜欢旧书、雨天和热可可。",
-      "schedule": "10:30 起床\n11:00 吃早午饭\n13:00 看书\n16:00 去上班（在电脑桌工作）\n23:30 下班回家\n00:30 泡澡\n02:00 睡觉",
-      "profile": { "age": 24, "birthday": "11-02", "job": "书店店员", "hobbies": "看书、听音乐", "likes": ["tea", "pudding"], "dislikes": ["curry"] },
-      "traits": { "extraversion": 25, "conscientiousness": 70, "agreeableness": 80, "neuroticism": 55, "openness": 75 },
-      "skills": { "cooking": 2, "music": 3, "art": 1, "gaming": 1, "study": 6, "fitness": 1 },
-      "lore": {
-        "selfName": "我",
-        "callPlayer": "你",
-        "speechStyle": "句子短，语气平静，很少用感叹号；被夸会转移话题",
-        "catchphrases": ["这样啊。", "……我想想。"],
-        "backstory": "从小城搬来这座城市，在一家开到深夜的旧书店工作了三年。",
-        "goals": "攒钱开一家自己的小书店",
-        "fears": "打雷、被很多人盯着看",
-        "likesTopics": "书、天气、猫",
-        "dislikesTopics": "老家的事",
-        "habits": "睡前一定要看几页书；下雨天会坐在窗边发呆",
-        "chronotype": "night",
-        "sickBehavior": "stubborn",
-        "conflictStyle": "不吵，先沉默，过一会儿自己来道歉",
-        "favoriteRoom": "书房",
-        "favoriteFurniture": ["bookshelf", "armchair", "bathtub"],
-        "presetRelations": [{ "name": "团团", "affinity": 45, "note": "合租室友，有点吵但人很好" }],
-        "custom": [{ "key": "怕冷", "value": "冬天总是裹着毯子" }]
-      },
-      "appearance": { "skin": "#ffe3d3", "hair": "#3b3550", "outfit": "#7f8fb5", "accent": "#e8d39a", "eyes": "#5a6b8c", "hairStyle": 1 }
-    },
-    {
+ "format": "wowo-character-pack",
+ "version": 1,
+ "characters": [
+  {
+   "name": "林栖",
+   "persona": "24 岁的夜班书店店员，安静、观察力强，话不多但每句都很认真。不擅长拒绝别人，累了也不太会说。喜欢旧书、雨天和热可可。",
+   "schedule": "10:30 起床\n11:00 吃早午饭\n13:00 看书\n16:00 去上班（在电脑桌工作）\n23:30 下班回家\n00:30 泡澡\n02:00 睡觉",
+   "profile": {
+    "age": 24,
+    "birthday": "11-02",
+    "job": "书店店员",
+    "hobbies": "看书、听音乐",
+    "likes": [
+     "tea",
+     "pudding"
+    ],
+    "dislikes": [
+     "curry"
+    ]
+   },
+   "traits": {
+    "extraversion": 25,
+    "conscientiousness": 70,
+    "agreeableness": 80,
+    "neuroticism": 55,
+    "openness": 75
+   },
+   "skills": {
+    "cooking": 2,
+    "music": 3,
+    "art": 1,
+    "gaming": 1,
+    "study": 6,
+    "fitness": 1
+   },
+   "lore": {
+    "selfName": "我",
+    "callPlayer": "你",
+    "speechStyle": "句子短，语气平静，很少用感叹号；被夸会转移话题",
+    "catchphrases": [
+     "这样啊。",
+     "……我想想。"
+    ],
+    "backstory": "从小城搬来这座城市，在一家开到深夜的旧书店工作了三年。",
+    "goals": "攒钱开一家自己的小书店",
+    "fears": "打雷、被很多人盯着看",
+    "likesTopics": "书、天气、猫",
+    "dislikesTopics": "老家的事",
+    "habits": "睡前一定要看几页书；下雨天会坐在窗边发呆",
+    "chronotype": "night",
+    "sickBehavior": "stubborn",
+    "conflictStyle": "不吵，先沉默，过一会儿自己来道歉",
+    "favoriteRoom": "书房",
+    "favoriteFurniture": [
+     "bookshelf",
+     "armchair",
+     "bathtub"
+    ],
+    "presetRelations": [
+     {
       "name": "团团",
-      "persona": "19 岁的体育大学生，精力旺盛、直来直去，饭量很大，最受不了冷场。嘴上嫌弃室友林栖太闷，其实很照顾她。",
-      "schedule": "07:00 起床\n07:30 吃早饭\n09:00 上网课\n12:00 吃午饭\n15:00 打游戏\n18:30 做饭\n23:00 睡觉",
-      "profile": { "age": 19, "birthday": "06-18", "job": "大学生", "hobbies": "打游戏、做饭", "likes": ["ramen", "dumplings", "rice"], "dislikes": ["porridge"] },
-      "traits": { "extraversion": 90, "conscientiousness": 35, "agreeableness": 65, "neuroticism": 20, "openness": 50 },
-      "skills": { "cooking": 4, "music": 1, "art": 0, "gaming": 6, "study": 2, "fitness": 7 },
-      "lore": {
-        "selfName": "我",
-        "callPlayer": "老板",
-        "speechStyle": "说话快，爱用感叹号和网络流行语",
-        "catchphrases": ["冲！", "饿饿，饭饭。"],
-        "goals": "期末别挂科",
-        "chronotype": "early",
-        "sickBehavior": "clingy",
-        "conflictStyle": "当场吵完，五分钟后就忘了",
-        "favoriteRoom": "客厅",
-        "favoriteFurniture": ["game_tv", "stove"],
-        "presetRelations": [{ "name": "林栖", "affinity": 50, "note": "室友，太闷了，得多带她出去玩" }]
-      }
-    }
-  ]
+      "affinity": 45,
+      "note": "合租室友，有点吵但人很好"
+     }
+    ],
+    "custom": [
+     {
+      "key": "怕冷",
+      "value": "冬天总是裹着毯子"
+     }
+    ],
+    "likedTags": [
+     "书香",
+     "阅读",
+     "安静",
+     "温馨",
+     "喝茶",
+     "植物"
+    ],
+    "dislikedTags": [
+     "热闹",
+     "赛博朋克"
+    ],
+    "heat": "cold"
+   },
+   "appearance": {
+    "skin": "#ffe3d3",
+    "hair": "#3b3550",
+    "outfit": "#7f8fb5",
+    "accent": "#e8d39a",
+    "eyes": "#5a6b8c",
+    "hairStyle": 1
+   }
+  },
+  {
+   "name": "团团",
+   "persona": "19 岁的体育大学生，精力旺盛、直来直去，饭量很大，最受不了冷场。嘴上嫌弃室友林栖太闷，其实很照顾她。",
+   "schedule": "07:00 起床\n07:30 吃早饭\n09:00 上网课\n12:00 吃午饭\n15:00 打游戏\n18:30 做饭\n23:00 睡觉",
+   "profile": {
+    "age": 19,
+    "birthday": "06-18",
+    "job": "大学生",
+    "hobbies": "打游戏、做饭",
+    "likes": [
+     "ramen",
+     "dumplings",
+     "rice"
+    ],
+    "dislikes": [
+     "porridge"
+    ]
+   },
+   "traits": {
+    "extraversion": 90,
+    "conscientiousness": 35,
+    "agreeableness": 65,
+    "neuroticism": 20,
+    "openness": 50
+   },
+   "skills": {
+    "cooking": 4,
+    "music": 1,
+    "art": 0,
+    "gaming": 6,
+    "study": 2,
+    "fitness": 7
+   },
+   "lore": {
+    "selfName": "我",
+    "callPlayer": "老板",
+    "speechStyle": "说话快，爱用感叹号和网络流行语",
+    "catchphrases": [
+     "冲！",
+     "饿饿，饭饭。"
+    ],
+    "goals": "期末别挂科",
+    "chronotype": "early",
+    "sickBehavior": "clingy",
+    "conflictStyle": "当场吵完，五分钟后就忘了",
+    "favoriteRoom": "客厅",
+    "favoriteFurniture": [
+     "game_tv",
+     "stove"
+    ],
+    "presetRelations": [
+     {
+      "name": "林栖",
+      "affinity": 50,
+      "note": "室友，太闷了，得多带她出去玩"
+     }
+    ],
+    "likedTags": [
+     "游戏",
+     "运动",
+     "热闹",
+     "吃饭",
+     "户外"
+    ],
+    "dislikedTags": [
+     "庄重",
+     "古典"
+    ],
+    "heat": "hot"
+   }
+  }
+ ]
 }

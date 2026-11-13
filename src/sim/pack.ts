@@ -136,6 +136,15 @@ export async function importPack(game: Game, raw: unknown): Promise<{ added: str
       if (typeof e.sprites === "string") await deleteSprites(e.sprites); // 改用 packs 文件夹里的新立绘
       else if (e.sprites) await saveSprites(e.sprites.id, e.sprites.files);
       invalidateSprites(spriteId);
+      // 顺便补上新版角色包里有、家里这位还没有的设定（主人改过的不动）
+      const d = same.d, el = e.lore ?? {}, ep = e.profile ?? {};
+      if (!d.lore.likedTags?.length && el.likedTags?.length) d.lore.likedTags = el.likedTags;
+      if (!d.lore.dislikedTags?.length && el.dislikedTags?.length) d.lore.dislikedTags = el.dislikedTags;
+      if ((!d.lore.heat || d.lore.heat === "normal") && el.heat) d.lore.heat = el.heat;
+      if (!d.lore.favoriteFurniture?.length && el.favoriteFurniture?.length) d.lore.favoriteFurniture = el.favoriteFurniture;
+      if (!d.profile.dislikes?.length && ep.dislikes?.length) d.profile.dislikes = ep.dislikes;
+      if (!d.profile.likes?.length && ep.likes?.length) d.profile.likes = ep.likes;
+      if (!d.profile.hobbies && ep.hobbies) d.profile.hobbies = ep.hobbies;
       updated.push(e.name);
       continue;
     }

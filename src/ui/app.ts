@@ -696,7 +696,7 @@ export class UI {
         return `<div class="pick-card ${home ? "home" : ""}">
           <span class="avatar img" style="--s:52px;--ring:${home ? "#5cc58a" : "transparent"};background:var(--soft)">${img ? `<img alt="" src="${esc(img)}" onerror="this.remove()">` : ""}</span>
           <div class="pick-main"><b>${esc(String(e.name ?? "（没有名字）"))}</b>${sub ? `<small>${esc(sub)}</small>` : ""}${persona ? `<p>${esc(persona)}…</p>` : ""}</div>
-          ${home ? `<button class="btn small" data-upd="${i}">更新立绘</button>` : `<button class="btn small primary" data-add="${i}">搬进来</button>`}
+          ${home ? `<button class="btn small" data-upd="${i}">更新</button>` : `<button class="btn small primary" data-add="${i}">搬进来</button>`}
         </div>`;
       }).join("");
       const left = list.filter((x) => state((x ?? {}) as Record<string, unknown>) === "new").length;
@@ -736,7 +736,7 @@ export class UI {
       this.renderRoster();
       this.game.save();
     }
-    const msg = [added.length ? `${added.join("、")}搬进来了` : "", updated.length ? `更新了 ${updated.join("、")} 的立绘` : ""].filter(Boolean).join("，") || "没有导入任何角色";
+    const msg = [added.length ? `${added.join("、")}搬进来了` : "", updated.length ? `更新了 ${updated.join("、")} 的立绘，补上了缺的设定` : ""].filter(Boolean).join("，") || "没有导入任何角色";
     // 「等某某搬进来以后关系会生效」这种提示，一个一个搬的时候很正常，不用弹窗
     const real = problems.filter((x) => !x.includes("这条关系会自动生效"));
     if (real.length) this.confirm(`${msg}。\n\n${real.join("\n")}`, () => {});
