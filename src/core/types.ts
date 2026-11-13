@@ -223,6 +223,8 @@ export interface CharacterData {
   today: DayStats;
   illness?: Illness;
   memories: Memory[];
+  /** 主人送的礼物 */
+  gifts?: { id: string; t: number; liked: number }[];
   /** 日记：每天睡前写一篇 */
   diary?: { day: string; text: string; t: number }[];
   relations: Record<string, Relation>; // key 为角色 id，"player" 为主人

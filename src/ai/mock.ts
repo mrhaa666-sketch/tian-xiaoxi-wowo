@@ -45,6 +45,13 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
     const line = phoneLine(c, away.text);
     return { thought: "给主人发条消息吧。", emotion, plan: [{ do: "tell_player", line }] };
   }
+  const gift = events.find((e) => e.text.startsWith("主人送了你一件礼物"));
+  if (gift) {
+    const name = gift.text.match(/礼物：(.+?)。/)?.[1] ?? "礼物";
+    const love = /你特别喜欢|你很喜欢/.test(gift.text), meh = /你不太喜欢/.test(gift.text);
+    const line = love ? `${name}……！我真的很喜欢，谢谢${c.d.lore.callPlayer || "你"}。` : meh ? `${name}啊……嗯，谢谢你想着我。` : `谢谢你送的${name}，我会好好收着的。`;
+    return { thought: love ? "好开心。" : "收到礼物了。", emotion: love ? "happy" : meh ? "normal" : "shy", plan: [{ do: "tell_player", line }] };
+  }
   const fed = events.find((e) => e.text.includes("主人给你准备了"));
   if (fed) {
     plan.push({ do: "eat", minutes: 10 }, { do: "tell_player", line: "谢谢，很好吃。" });

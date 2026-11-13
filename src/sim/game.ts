@@ -9,6 +9,7 @@ import { defaultSettings, normalizeCharacter, sampleCharacters } from "./default
 import type { WeatherNow } from "../core/types";
 import { checkGroupRoutines, type Together } from "./together";
 import { checkRelEvents } from "./events";
+import { GIFT_BY_ID, giftScore, giftWord } from "../world/gifts";
 import { FEELING_CN, feeling, feltTemp, fetchForecast, roomTemps, seasonTemp, weatherFromSettings, weatherLine } from "./climate";
 
 const SAVE_KEY = "wowo-save-v1";
@@ -337,6 +338,23 @@ export class Game {
     const rel = from ? undefined : c.d.relations.player;
     if (rel) rel.affinity = clamp(rel.affinity + 2, -100, 100);
     this.changed();
+  }
+
+  /** 主人送礼物：按 TA 的喜好决定开不开心 */
+  giveGift(c: Character, giftId: string) {
+    const g = GIFT_BY_ID[giftId];
+    if (!g) return;
+    const s = giftScore(c, g);
+    (c.d.gifts ??= []).push({ id: g.id, t: Date.now(), liked: s });
+    const rel = c.d.relations.player;
+    if (rel) rel.affinity = clamp(rel.affinity + (s >= 5 ? 8 : s >= 2 ? 5 : s >= 0 ? 2 : -1), -100, 100);
+    c.d.needs.mood = clamp(c.d.needs.mood + Math.max(-5, Math.min(20, 4 + s * 3)));
+    c.showEmote(s >= 2 ? "💝" : s >= 0 ? "🎁" : "😅", 4);
+    const why = [...g.tags.filter((t) => c.d.lore.likedTags.includes(t)).map((t) => `你喜欢「${t}」`), ...g.tags.filter((t) => c.d.lore.dislikedTags.includes(t)).map((t) => `你不喜欢「${t}」`)].join("，");
+    this.log("player", `送给${c.name}${g.icon}${g.name}（TA ${giftWord(s)}）`);
+    this.emit(c, `主人送了你一件礼物：${g.name}。你${giftWord(s)}${why ? `（${why}）` : ""}。按你的性格用 tell_player 回应主人，${s < 0 ? "就算不太喜欢也可以照实说，或者委婉一点" : "可以说说你会怎么用它"}。`, 3);
+    this.changed();
+    return s;
   }
 
   /** 主人强制让角色回床上休息（比如生病还硬撑着工作） */

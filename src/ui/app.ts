@@ -15,6 +15,7 @@ import { levelName } from "../world/world";
 import { assetUrl } from "../render/assets";
 import { customFurniture, customRooms, exportFurniturePack, exportRoom, importHomePack, removeCustomFurniture, removeCustomRoom, setFurnitureTags } from "../world/homepack";
 import { TAG_GROUPS } from "../world/tags";
+import { GIFTS, GIFT_BY_ID } from "../world/gifts";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
 import { scoreOptions } from "../sim/autonomy";
@@ -792,17 +793,25 @@ export class UI {
       <div class="d-actions">
         <button class="act primary" id="act-chat">${icon("chat")}<span>聊天</span></button>
         <button class="act" id="act-feed">🍚<span>喂饭</span></button>
+        <button class="act" id="act-gift">🎁<span>送礼</span></button>
         <button class="act" id="act-do">🪑<span>安排</span></button>
         <button class="act" id="act-bed">🛏️<span>去休息</span></button>
         <button class="act" id="act-edit">✏️<span>人设</span></button>
       </div>
+      <div class="foods" id="gifts" hidden>${GIFTS.map((g) => `<button class="food" data-gift="${g.id}"><span class="gift-ic">${g.icon}</span><span>${esc(g.name)}</span></button>`).join("")}</div>
       <div class="foods" id="foods" hidden>${FOODS.map((f) => `<button class="food" data-food="${f.id}"><img alt="" src="${asset("food", "food_" + f.id)}" onerror="this.remove()"><span>${esc(f.name)}</span></button>`).join("")}</div>
       <div class="seg">${tabs.map(([k, n]) => `<button data-tab="${k}" class="${this.tab === k ? "on" : ""}">${n}</button>`).join("")}</div>
       <div class="tabbody" id="tabbody"></div>`;
     const $ = <T extends HTMLElement>(s: string) => body.querySelector<T>(s)!;
     $("#d-close").onclick = () => this.select(null);
     $("#act-chat").onclick = () => this.openChat(c.id);
-    $("#act-feed").onclick = () => { $("#foods").hidden = !$("#foods").hidden; };
+    $("#act-feed").onclick = () => { $("#foods").hidden = !$("#foods").hidden; $("#gifts").hidden = true; };
+    $("#act-gift").onclick = () => { $("#gifts").hidden = !$("#gifts").hidden; $("#foods").hidden = true; };
+    body.querySelectorAll<HTMLElement>("[data-gift]").forEach((b) => (b.onclick = () => {
+      const s = this.game.giveGift(c, b.dataset.gift!);
+      $("#gifts").hidden = true;
+      this.flash(`送给${c.name}${GIFT_BY_ID[b.dataset.gift!].name}${s === undefined ? "" : s >= 2 ? "，TA 看起来很开心" : s < 0 ? "，TA 好像不太喜欢" : ""}`);
+    }));
     body.querySelectorAll<HTMLElement>("[data-food]").forEach((b) => (b.onclick = () => { this.game.feed(c, b.dataset.food!); $("#foods").hidden = true; this.flash(`给${c.name}准备了${FOODS.find((f) => f.id === b.dataset.food)?.name}`); }));
     $("#act-bed").onclick = () => { this.game.sendToBed(c); this.flash(`让${c.name}回床上休息`); };
     $("#act-edit").onclick = () => this.openEditor(c);
@@ -946,6 +955,7 @@ export class UI {
         <div><span>爱好</span><b>${esc(p.hobbies || "—")}</b></div>
         <div><span>喜欢吃</span><b>${food(p.likes)}</b></div>
         <div><span>不爱吃</span><b>${food(p.dislikes)}</b></div>
+        <div><span>收到的礼物</span><b>${(c.d.gifts ?? []).slice(-8).map((x) => GIFT_BY_ID[x.id]?.icon ?? "").join("") || "还没有"}</b></div>
         <div><span>TA 的房间</span><b>${esc(this.game.roomsOf(c).join("、") || "还没有")} <button class="btn small" data-own-rooms>分配</button></b></div>
       </div>
       <h4 class="sec">性格</h4><div class="traits">${traits}</div>
