@@ -269,6 +269,21 @@ export class UI {
     setTimeout(() => document.addEventListener("pointerdown", this.menuAway, { once: true, capture: true }), 0);
     return true;
   }
+  /** 通用的小菜单：在画面上某个位置弹出几个按钮 */
+  showActionMenu(title: string, items: { label: string; note?: string; danger?: boolean; act: () => void }[], x: number, y: number) {
+    this.closeFurnitureMenu();
+    const menu = document.createElement("div");
+    menu.className = "fmenu";
+    menu.innerHTML = `<div class="fmenu-title">${esc(title)}</div>${items.map((it, i) => `<button data-mi="${i}"${it.danger ? ' class="danger"' : ""}>${esc(it.label)}${it.note ? `<small>${esc(it.note)}</small>` : ""}</button>`).join("")}`;
+    const phone = this.els.phone;
+    phone.appendChild(menu);
+    const r = phone.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = `${Math.max(8, Math.min(r.width - mw - 8, x - mw / 2))}px`;
+    menu.style.top = `${Math.max(60, Math.min(r.height - mh - 120, y - mh - 16))}px`;
+    menu.querySelectorAll<HTMLElement>("[data-mi]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); this.closeFurnitureMenu(); items[+b.dataset.mi!].act(); }));
+    setTimeout(() => document.addEventListener("pointerdown", this.menuAway, { once: true, capture: true }), 0);
+  }
   private menuAway = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".fmenu")) this.closeFurnitureMenu(); else document.addEventListener("pointerdown", this.menuAway, { once: true, capture: true }); };
   closeFurnitureMenu() { this.els.phone.querySelectorAll(".fmenu").forEach((m) => m.remove()); }
 

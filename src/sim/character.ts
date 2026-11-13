@@ -66,6 +66,8 @@ export class Character {
   /** 用新计划替换当前计划。正在做的事会被打断。 */
   /** 正在「闲逛」：两件事之间没事做，在公寓里随便走走（随时可以被新的决定打断） */
   ambient = false;
+  /** 正被主人长按拖着走 */
+  held = false;
 
   setPlan(steps: PlanStep[], interrupt = true, ambient = false) {
     if (interrupt) this.stopCurrent();
@@ -105,6 +107,7 @@ export class Character {
     if (this.emote && now > this.emote.until) this.emote = null;
     this.perceive(now);
     this.updateNeeds(dt);
+    if (this.held) { this.moving = false; return; } // 被主人拎着：什么都不做
     if (!this.run && this.queue.length) this.startStep(this.queue.shift()!);
     if (this.run) this.updateRun(dt, now);
   }

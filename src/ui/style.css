@@ -421,4 +421,5 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .fmenu-title { font-size: 12px; color: var(--muted); padding: 4px 10px 2px; }
 .fmenu button { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px; border-radius: 12px; text-align: left; font-weight: 700; }
 .fmenu button:active, .fmenu button:hover { background: var(--accent-soft); }
+.fmenu button.danger { color: #d0455a; }
 .fmenu small { font-weight: 400; color: var(--muted); font-size: 11px; }

@@ -3,6 +3,8 @@ import { Brain } from "./ai/brain";
 import { getNews } from "./ai/news";
 import { Game } from "./sim/game";
 import { Scene, type Ghost } from "./render/scene";
+import type { Character } from "./sim/character";
+import type { FurnitureInst } from "./core/types";
 import { UI } from "./ui/app";
 import { FURNITURE_BY_ID } from "./world/catalog";
 import { initSpriteStore } from "./render/spriteStore";
@@ -95,27 +97,114 @@ async function boot() {
   let dragStart: { x: number; y: number; moved: boolean; button: number } | null = null;
   let paintStart: { x: number; y: number } | null = null;
   let pinchDist = 0;
-  // 长按家具：删除
+  // 长按：拎起家具或角色，拖到别处放下；长按家具不动直接松手，弹出删除 / 镜像 / 翻面
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+  type Grab =
+    | { kind: "furn"; f: FurnitureInst; offX: number; offY: number; x: number; y: number; moved: boolean; sx: number; sy: number }
+    | { kind: "char"; c: Character; from: { x: number; y: number } };
+  let grab: Grab | null = null;
+  const toPhone = (sx: number, sy: number) => {
+    const r = canvas.getBoundingClientRect(), pr = ui.els.phone.getBoundingClientRect();
+    return { x: sx + r.left - pr.left, y: sy + r.top - pr.top };
+  };
+  let pressChar: Character | null = null; // 按下那一刻手指下的人（人在走动，等长按生效时可能已经走开了）
   const longPress = (sx: number, sy: number) => {
     pressTimer = null;
-    const f = scene.pickFurniture(sx, sy) ?? game.world.furnitureAt(Math.floor(scene.screenToGrid(sx, sy).x), Math.floor(scene.screenToGrid(sx, sy).y)) ?? null;
-    if (!f) return;
+    if (ui.build.on) return;
+    const g = scene.screenToGrid(sx, sy);
+    const c = pressChar ?? scene.pickCharacter(sx, sy);
+    pressChar = null;
+    if (c) {
+      grab = { kind: "char", c, from: { ...c.d.pos } };
+      c.setPlan([], true);
+      c.held = true;
+      c.back = false;
+      moveGrab(sx, sy); // 人立刻到手指下面
+    } else {
+      const f = scene.pickFurniture(sx, sy) ?? game.world.furnitureAt(Math.floor(g.x), Math.floor(g.y)) ?? null;
+      if (!f) return;
+      grab = { kind: "furn", f, offX: Math.floor(g.x) - f.x, offY: Math.floor(g.y) - f.y, x: f.x, y: f.y, moved: false, sx, sy };
+      scene.ghost = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: true };
+    }
+    ui.closeFurnitureMenu();
     if (dragStart) dragStart.moved = true; // 松手时不再当成点击
     paintStart = null;
     navigator.vibrate?.(20);
+  };
+  const moveGrab = (sx: number, sy: number) => {
+    if (!grab) return;
+    const g = scene.screenToGrid(sx, sy);
+    if (grab.kind === "char") {
+      // 人跟着手指走（手指按在头上，脚在下面一点）
+      const p = scene.screenToGrid(sx, sy + 40 * scene.zoom);
+      grab.c.d.pos = { x: p.x, y: p.y };
+      return;
+    }
+    if (Math.hypot(sx - grab.sx, sy - grab.sy) > 8) grab.moved = true;
+    grab.x = Math.floor(g.x) - grab.offX;
+    grab.y = Math.floor(g.y) - grab.offY;
+    const f = grab.f;
+    scene.ghost = { kind: "furniture", x: grab.x, y: grab.y, def: f.def, rot: f.rot, ok: game.world.canPlace(f.def, grab.x, grab.y, f.rot, f.uid) };
+  };
+  const furnitureMenu = (f: FurnitureInst, sx: number, sy: number) => {
     const name = FURNITURE_BY_ID[f.def]?.name ?? "家具";
-    scene.ghost = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: false };
-    ui.confirm(`要把这件${name}删掉吗？`, () => {
-      const occ = game.occupantOf(f.uid);
-      if (occ) occ.setPlan([], true); // 正在用的人先停下
-      game.world.removeFurniture(f.uid);
-      game.log("player", `删掉了${name}`);
+    const w = game.world;
+    const p = toPhone(sx, sy);
+    const stopUser = () => { const occ = game.occupantOf(f.uid); if (occ) occ.setPlan([], true); };
+    ui.showActionMenu(name, [
+      { label: "镜像", note: "左右翻过来", act: () => { f.flip = !f.flip; game.changed(); } },
+      { label: "翻面", note: "朝里 / 朝外", act: () => { f.back = !f.back; game.changed(); } },
+      { label: "转向", note: "横放 / 竖放", act: () => {
+        const rot = (f.rot ? 0 : 1) as 0 | 1;
+        if (!w.canPlace(f.def, f.x, f.y, rot, f.uid)) { ui.flash("这里转不开"); return; }
+        stopUser(); f.rot = rot; w.rebuildIndex(); game.changed();
+      } },
+      { label: "删除", danger: true, act: () => ui.confirm(`要把这件${name}删掉吗？`, () => {
+        stopUser();
+        w.removeFurniture(f.uid);
+        game.log("player", `删掉了${name}`);
+        game.changed();
+        ui.flash(`删掉了${name}`);
+      }) },
+    ], p.x, p.y);
+  };
+  const dropGrab = (sx: number, sy: number, cancelled = false) => {
+    const gr = grab;
+    grab = null;
+    if (!gr) return;
+    const w = game.world;
+    if (gr.kind === "char") {
+      const c = gr.c;
+      c.held = false;
+      const t = { x: Math.floor(c.d.pos.x), y: Math.floor(c.d.pos.y) };
+      if (cancelled || !w.walkable(t.x, t.y)) {
+        c.d.pos = gr.from;
+        if (!cancelled) ui.flash("那里放不下人");
+        return;
+      }
+      c.d.pos = { x: t.x + 0.5, y: t.y + 0.5 };
+      const room = w.roomOf(c.d.pos.x, c.d.pos.y);
+      const fromRoom = w.roomOf(gr.from.x, gr.from.y);
+      if (Math.hypot(c.d.pos.x - gr.from.x, c.d.pos.y - gr.from.y) > 1) {
+        game.emit(c, room && room !== fromRoom ? `主人把你直接抱到了${room}。` : `主人把你挪了个位置。`, 2);
+        game.log("player", `把${c.name}抱到了${room || "别处"}`);
+      }
       game.changed();
-      ui.flash(`删掉了${name}`);
-    });
-    setTimeout(() => { if (scene.ghost?.kind === "furniture") scene.ghost = null; }, 1500);
+      return;
+    }
+    scene.ghost = null;
+    const f = gr.f;
+    if (cancelled) return;
+    if (!gr.moved) { furnitureMenu(f, sx, sy); return; }
+    if (gr.x === f.x && gr.y === f.y) return;
+    if (!w.canPlace(f.def, gr.x, gr.y, f.rot, f.uid)) { ui.flash("那里放不下"); return; }
+    const occ = game.occupantOf(f.uid);
+    if (occ) occ.setPlan([], true); // 正在用的人先停下
+    f.x = gr.x; f.y = gr.y;
+    w.rebuildIndex();
+    game.log("player", `把${FURNITURE_BY_ID[f.def]?.name ?? "家具"}挪了个地方`);
+    game.changed();
   };
 
   const local = (e: PointerEvent | WheelEvent) => {
@@ -219,13 +308,17 @@ async function boot() {
       const [a, b] = [...pointers.values()];
       pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
       cancelPress();
+      dropGrab(0, 0, true);
       dragStart = null;
       paintStart = null;
       return;
     }
     dragStart = { ...p, moved: false, button: e.button };
     cancelPress();
-    if (e.button === 0) pressTimer = setTimeout(() => longPress(p.x, p.y), 550);
+    if (e.button === 0) {
+      pressChar = ui.build.on ? null : scene.pickCharacter(p.x, p.y);
+      pressTimer = setTimeout(() => longPress(p.x, p.y), 550);
+    }
     if (ui.build.on && e.button === 0 && ui.build.tool === "floor") {
       const { tx, ty } = hoverInfo(p.x, p.y);
       paintStart = { x: tx, y: ty };
@@ -244,6 +337,7 @@ async function boot() {
       return;
     }
     if (prev) pointers.set(e.pointerId, p);
+    if (grab) { if (prev) moveGrab(p.x, p.y); return; }
     if (dragStart && prev) {
       const far = Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > 6;
       const panning = !ui.build.on || dragStart.button !== 0 || (ui.build.tool !== "floor");
@@ -262,6 +356,7 @@ async function boot() {
     if (pointers.size < 2) pinchDist = 0;
     const ds = dragStart;
     dragStart = null;
+    if (grab) { dropGrab(p.x, p.y); return; }
     if (ui.build.on && paintStart && e.button === 0) {
       const { tx, ty } = hoverInfo(p.x, p.y);
       const x0 = Math.min(paintStart.x, tx), y0 = Math.min(paintStart.y, ty);
@@ -294,7 +389,7 @@ async function boot() {
     ui.select(c ? c.id : null);
   };
   canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", (e) => { cancelPress(); pointers.delete(e.pointerId); dragStart = null; paintStart = null; });
+  canvas.addEventListener("pointercancel", (e) => { cancelPress(); dropGrab(0, 0, true); pointers.delete(e.pointerId); dragStart = null; paintStart = null; });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const p = local(e);
