@@ -24,6 +24,7 @@ import { saveSprites, spriteUrl } from "../render/spriteStore";
 import type { PermissionApi } from "../platform/android";
 import { currentHour, daylightAt } from "../render/daylight";
 import { clearLog, formatLog } from "../core/log";
+import { applyBackup, autoBackup, listDaily, loadDaily, makeBackup, parseBackup } from "../core/backup";
 
 const PALETTES: [string, string, string][] = [
   ["pink", "樱花粉", "#e8789a"], ["purple", "薰衣草紫", "#9a7ae0"], ["blue", "天空蓝", "#5f9ee8"],
@@ -1585,6 +1586,10 @@ export class UI {
         <div class="help">两个数一样表示不设免打扰。</div>
         ${this.permissions ? `<button type="button" class="btn primary block" id="s-perm-all">一键获取权限</button><div class="help">依次弹出通知、不受省电限制等系统授权窗口，选「允许」就好。</div>
         <button type="button" class="btn block" id="s-perm" style="margin-top:8px">查看各项权限</button><div class="help">逐项检查有没有开好，包括要手动打开的「自启动」。</div>` : ""}
+        <h3 class="group">存档</h3>
+        <div class="help" style="margin-bottom:8px">整个家（房子、角色、聊天、记忆、设置、自制家具）存成一个文件，换手机、重装以后可以导回来。另外每天会自动在这台设备上留一份备份，最多 7 天。</div>
+        <label class="switch"><input type="checkbox" id="s-bk-img" checked /><span>连立绘和自制家具图片一起导出（文件会大很多，换手机时需要）</span></label>
+        <div class="pack-row"><button type="button" class="btn small primary" id="s-bk-out">导出存档</button><button type="button" class="btn small" id="s-bk-in">从文件恢复</button><button type="button" class="btn small" id="s-bk-daily">每天的备份</button></div>
         <h3 class="group">日志</h3>
         <button type="button" class="btn block" id="s-log">查看和导出日志</button>
         <div class="help">AI 出错、程序报错时会记在这里，导出来发给开发者就能查原因。不会记 API Key 和聊天内容。</div>
@@ -1659,12 +1664,52 @@ export class UI {
       if (!g) { $("#s-wplace").textContent = "没找到这个城市"; return; }
       setPlace(g.lat, g.lon, g.place);
     };
+    $("#s-bk-out").onclick = async () => {
+      this.flash("正在打包存档…");
+      this.game.save();
+      const b = await makeBackup(this.game.toSave(), $<HTMLInputElement>("#s-bk-img").checked);
+      const d = new Date();
+      await this.saveFile(`恬小溪窝窝存档-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}.json`, JSON.stringify(b));
+      this.flash("存档已导出");
+    };
+    $("#s-bk-in").onclick = () => {
+      const el = document.createElement("input");
+      el.type = "file";
+      el.onchange = async () => {
+        const f = el.files?.[0];
+        if (!f) return;
+        let b: ReturnType<typeof parseBackup> = null;
+        try { b = parseBackup(JSON.parse(await f.text())); } catch { /* 下面提示 */ }
+        if (!b) { this.flash("这个文件不是恬小溪窝窝的存档"); return; }
+        const bk = b;
+        this.confirm(`用这个存档覆盖现在的家？\n存档时间：${new Date(bk.createdAt).toLocaleString("zh-CN")}\n里面有：${bk.save.characters.map((c) => c.name).join("、") || "没有人"}\n\n现在的家会先自动备份一份，可以在「每天的备份」里找回。`, async () => {
+          await autoBackup(this.game.toSave());
+          this.game.frozen = true;
+          await applyBackup(bk);
+          location.reload();
+        });
+      };
+      el.click();
+    };
+    $("#s-bk-daily").onclick = async () => {
+      const list = await listDaily();
+      if (!list.length) { this.flash("还没有自动备份（打开一分钟后会备份第一份）"); return; }
+      const pr = this.els.phone.getBoundingClientRect(), r = $("#s-bk-daily").getBoundingClientRect();
+      this.showActionMenu("回到哪一天？", list.map((x) => ({ label: x.day, note: `${new Date(x.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · ${x.chars.length} 人`, act: () => this.confirm(`回到 ${x.day} 的家？现在的变化会丢掉（今天的会先备份一份）。`, async () => {
+        const b = await loadDaily(x.day);
+        if (!b) { this.flash("这份备份读不出来"); return; }
+        if (x.day !== list[0].day) await autoBackup(this.game.toSave());
+        this.game.frozen = true;
+        await applyBackup(b);
+        location.reload();
+      }) })), r.left - pr.left + r.width / 2, r.top - pr.top);
+    };
     const tn = p.querySelector<HTMLElement>("#s-testn");
     if (tn) tn.onclick = async () => {
       const ok = await this.testNotify!();
       this.flash(ok ? "发了一条测试通知，看看手机顶上" : "通知权限还没开，先允许通知");
     };
-    $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
+    $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？（会先自动备份一份，后悔了可以在「每天的备份」里找回）", async () => { await autoBackup(this.game.toSave()); this.game.frozen = true; Game.wipe(); location.reload(); });
     $("#s-save").onclick = () => {
       ai.provider = $<HTMLSelectElement>("#s-provider").value as typeof ai.provider;
       ai.apiKey = $<HTMLInputElement>("#s-key").value.trim();

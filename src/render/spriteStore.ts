@@ -101,3 +101,35 @@ export async function readSprites(id: string): Promise<Record<string, string> | 
     return out;
   } catch { return null; }
 }
+
+const blobToData = (b: Blob) => new Promise<string>((resolve) => { const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.readAsDataURL(b); });
+
+/** 把数据库里所有的立绘和自制家具图片读出来（备份用）：「<id>/<文件名>」→ data: 地址 */
+export async function dumpSprites(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  try {
+    const db = await open();
+    const entries = await new Promise<[string, Blob][]>((resolve) => {
+      const list: [string, Blob][] = [];
+      const req = db.transaction(STORE, "readonly").objectStore(STORE).openCursor();
+      req.onsuccess = () => { const cur = req.result; if (!cur) return resolve(list); list.push([String(cur.key), cur.value as Blob]); cur.continue(); };
+      req.onerror = () => resolve(list);
+    });
+    for (const [k, b] of entries) out[k] = await blobToData(b);
+  } catch { /* 没有数据库 */ }
+  return out;
+}
+
+/** 从备份里恢复图片（同名的会被替换） */
+export async function restoreSprites(files: Record<string, string>) {
+  const byId = new Map<string, Record<string, string>>();
+  for (const [k, v] of Object.entries(files)) {
+    const i = k.indexOf("/");
+    if (i <= 0) continue;
+    const id = k.slice(0, i), name = k.slice(i + 1);
+    if (!/^[\w-]+$/.test(id) || !/^[\w-]+\.(png|json)$/.test(name)) continue;
+    if (!byId.has(id)) byId.set(id, {});
+    byId.get(id)![name] = v;
+  }
+  for (const [id, f] of byId) await saveSprites(id, f);
+}

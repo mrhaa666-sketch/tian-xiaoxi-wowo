@@ -11,6 +11,7 @@ import { initSpriteStore } from "./render/spriteStore";
 import { initAndroid } from "./platform/android";
 import { ROOM_PRESETS, autoWalls, ensureLanding, stampPreset } from "./world/presets";
 import { loadCustomHome, loadTagOverrides } from "./world/homepack";
+import { autoBackup } from "./core/backup";
 import { levelName } from "./world/world";
 
 async function boot() {
@@ -92,6 +93,9 @@ async function boot() {
 
   // ———————————————————— 存档 ————————————————————
   setInterval(() => game.save(), 10_000);
+  // 每天自动在本机留一份备份（启动一分钟后，以及之后每小时检查一次）
+  setTimeout(() => void autoBackup(game.toSave()), 60_000);
+  setInterval(() => void autoBackup(game.toSave()), 3600_000);
   document.addEventListener("visibilitychange", () => {
     game.playerWatching = document.visibilityState === "visible";
     if (!game.playerWatching) game.save();

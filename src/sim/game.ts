@@ -112,7 +112,11 @@ export class Game {
     };
   }
 
+  /** 恢复备份时冻结：之后不再存档，免得刷新页面前把恢复好的存档又覆盖掉 */
+  frozen = false;
+
   save() {
+    if (this.frozen) return;
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(this.toSave()));
     } catch (e) {
