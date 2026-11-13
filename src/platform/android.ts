@@ -4,6 +4,9 @@ import { App } from "@capacitor/app";
 import { BackgroundRunner } from "@capacitor/background-runner";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
+import { dlog } from "../core/log";
 import type { Brain } from "../ai/brain";
 import type { Character } from "../sim/character";
 import type { Game } from "../sim/game";
@@ -28,6 +31,17 @@ export interface PermissionApi {
   requestBattery(): Promise<void>;
   openExactAlarm(): Promise<void>;
   openAutostart(): Promise<boolean>;
+  /** 一键：依次弹出能弹的系统授权窗口，不能弹的打开对应设置页（每一项回到应用后再进行下一项） */
+  requestAll(): Promise<void>;
+}
+
+/** 等主人从系统设置页回到应用（最多等 2 分钟） */
+function waitForReturn(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    void App.addListener("appStateChange", ({ isActive }) => { if (isActive) setTimeout(finish, 400); }).then((h) => setTimeout(() => { h.remove(); finish(); }, 120_000));
+  });
 }
 const KeepAlive = registerPlugin<KeepAlivePlugin>("KeepAlive");
 
@@ -114,6 +128,33 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
     requestBattery: async () => { await KeepAlive.requestIgnoreBatteryOptimizations().catch(() => {}); },
     openExactAlarm: async () => { await KeepAlive.openExactAlarmSettings().catch(() => {}); },
     openAutostart: () => KeepAlive.openAutostartSettings().then((r) => r.opened).catch(() => false),
+    requestAll: async () => {
+      let st = await KeepAlive.status();
+      // 1. 通知：系统弹窗
+      if (!st.notifications) {
+        const r = await LocalNotifications.requestPermissions().catch(() => ({ display: "denied" }));
+        dlog("info", "权限", `通知：${r.display}`);
+      }
+      // 2. 不受省电限制：系统弹窗（会短暂离开应用）
+      st = await KeepAlive.status();
+      if (!st.battery) { const back = waitForReturn(); await KeepAlive.requestIgnoreBatteryOptimizations().catch(() => {}); await back; }
+      // 3. 准时提醒：安卓 12 以上只能打开设置页
+      st = await KeepAlive.status();
+      if (st.sdk >= 31 && !st.exactAlarm) { const back = waitForReturn(); await KeepAlive.openExactAlarmSettings().catch(() => {}); await back; }
+      st = await KeepAlive.status();
+      dlog("info", "权限", `一键获取后：通知 ${st.notifications}、省电 ${st.battery}、准时 ${st.exactAlarm}（${st.manufacturer}，安卓 SDK ${st.sdk}）`);
+    },
+  };
+  // 导出日志：存成文件，打开系统分享
+  ui.shareFile = async (name, text) => {
+    try {
+      const f = await Filesystem.writeFile({ path: name, data: text, directory: Directory.Cache, encoding: Encoding.UTF8 });
+      await Share.share({ title: name, files: [f.uri], dialogTitle: "导出日志" });
+      return true;
+    } catch (e) {
+      dlog("warn", "日志", `分享失败：${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
   };
   // 第一次打开：主动带主人把后台权限都开好
   let guided = false;

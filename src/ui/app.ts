@@ -16,6 +16,13 @@ import { cleanEntry, exportPack, importPack, type PackCharacter } from "../sim/p
 import { processUpload, type UploadResult } from "../render/upload";
 import { saveSprites, spriteUrl } from "../render/spriteStore";
 import type { PermissionApi } from "../platform/android";
+import { currentHour, daylightAt } from "../render/daylight";
+import { clearLog, formatLog } from "../core/log";
+
+const PALETTES: [string, string, string][] = [
+  ["pink", "樱花粉", "#e8789a"], ["purple", "薰衣草紫", "#9a7ae0"], ["blue", "天空蓝", "#5f9ee8"],
+  ["green", "薄荷绿", "#4fb592"], ["orange", "蜜桃橙", "#ee9a5a"], ["berry", "莓果红", "#d2557a"],
+];
 import { DEEPSEEK_BASE } from "../ai/provider";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -138,6 +145,10 @@ export class UI {
     this.els.tabbar.querySelectorAll<HTMLElement>("[data-nav]").forEach((b) => (b.onclick = () => this.nav(b.dataset.nav!)));
     this.els.grab.onclick = () => { this.sheetFull = !this.sheetFull; this.layoutSheet(); };
     game.onPlayerMessage((c, text) => this.toast(c, text));
+    // 外观：配色、深色模式、跟着时间变化
+    this.applyLook();
+    setInterval(() => this.applyLook(), 60_000);
+    window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => this.applyLook());
     this.renderAll();
   }
 
@@ -195,6 +206,64 @@ export class UI {
     else body.innerHTML = "";
   }
 
+  /** 安卓版：把文本存成文件并打开系统分享（发给微信、QQ，或保存到手机） */
+  shareFile?: (name: string, text: string) => Promise<boolean>;
+
+  /** 日志：查看、复制、导出 */
+  openLog() {
+    const ai = this.game.settings.ai;
+    const text = () => formatLog({
+      版本: "恬小溪窝窝 " + (import.meta.env.MODE === "production" ? "正式构建" : "开发模式"),
+      AI: ai.provider === "mock" || !ai.apiKey ? "本地模拟" : `${ai.provider} / ${ai.fastModel} / ${ai.chatModel}${ai.provider !== "anthropic" ? ` / ${ai.baseUrl}` : ""}`,
+      AI状态: `${this.brain.status.mode}：${this.brain.status.message}`,
+      角色数: String(this.game.chars.length),
+    });
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>日志</h2></header>
+      <div class="page-body">
+        <div class="log-btns"><button class="btn small primary" id="lg-export">导出</button><button class="btn small" id="lg-copy">复制</button><button class="btn small danger" id="lg-clear">清空</button></div>
+        <pre class="log-pre" id="lg-text"></pre>
+      </div>`);
+    const pre = p.querySelector<HTMLElement>("#lg-text")!;
+    const show = () => { pre.textContent = text(); };
+    show();
+    p.querySelector<HTMLElement>("#lg-copy")!.onclick = async () => {
+      try { await navigator.clipboard.writeText(text()); this.flash("已复制，可以粘贴发给开发者"); }
+      catch { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel?.removeAllRanges(); sel?.addRange(r); this.flash("没能自动复制，已选中，长按复制"); }
+    };
+    p.querySelector<HTMLElement>("#lg-export")!.onclick = async () => {
+      const name = `恬小溪窝窝-日志-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.txt`;
+      if (this.shareFile && await this.shareFile(name, text())) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text()], { type: "text/plain" }));
+      a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    p.querySelector<HTMLElement>("#lg-clear")!.onclick = () => this.confirm("清空所有日志？", () => { clearLog(); show(); });
+  }
+
+  /** 按设置给界面换配色、切深色模式、跟着天色染一层底色 */
+  applyLook() {
+    const lk = this.game.settings.look;
+    const root = document.documentElement;
+    const dl = daylightAt(currentHour(null));
+    root.dataset.palette = lk.palette;
+    const dark = lk.mode === "dark" || (lk.mode === "system" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches) || (lk.mode === "time" && dl.night > 0.5);
+    root.dataset.mode = dark ? "dark" : "light";
+    if (lk.timeTint) {
+      root.dataset.timeTint = "1";
+      // 清晨偏粉、白天几乎不染、傍晚偏橙、夜里偏深蓝
+      const tint = dl.night > 0.5 ? dl.skyTop : dl.skyBottom;
+      const k = dark ? 0.22 : dl.sun > 0.85 && dl.night < 0.05 ? 0.06 : 0.16;
+      root.style.setProperty("--time-tint", `#${tint.toString(16).padStart(6, "0")}`);
+      root.style.setProperty("--time-k", String(k));
+    } else {
+      delete root.dataset.timeTint;
+    }
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#1b1820" : "#f4f1ec");
+  }
+
   renderAll() {
     this.renderView();
     this.renderTop();
@@ -210,12 +279,20 @@ export class UI {
     this.els.time.textContent = t.time;
     this.els.date.textContent = `${now.getMonth() + 1}月${now.getDate()}日 ${t.date.slice(-3)} · ${t.lunar.replace("农历", "")}`;
     const s = this.brain.status;
-    const ai = s.mode === "online" ? `<span class="chip ai on" title="AI 在线">AI${s.thinking ? " 思考中" : ""}</span>`
-      : s.mode === "error" ? `<span class="chip ai err" title="${esc(s.message)}">AI 出错</span>`
-      : `<span class="chip ai" title="本地模拟模式">本地</span>`;
+    const ai = s.mode === "online" ? `<button class="chip ai on" data-ai-chip title="AI 在线">AI${s.thinking ? " 思考中" : ""}</button>`
+      : s.mode === "error" ? `<button class="chip ai err" data-ai-chip title="${esc(s.message)}">AI 出错</button>`
+      : `<button class="chip ai" data-ai-chip title="本地模拟模式">本地</button>`;
     const fest = this.game.todayFestivals.slice(0, 2).map((f) => `<span class="chip fest">${esc(f)}</span>`).join("");
     const html = fest + ai;
-    if (this.els.chips.innerHTML !== html) this.els.chips.innerHTML = html;
+    if (this.els.chips.innerHTML !== html) {
+      this.els.chips.innerHTML = html;
+      // 手机上看不到悬停提示：点一下显示原因
+      this.els.chips.querySelector<HTMLElement>("[data-ai-chip]")!.onclick = () => {
+        const st = this.brain.status;
+        if (st.mode === "error") this.confirm(`AI 出错了：${st.message}\n\n要看详细的日志吗？`, () => this.openLog());
+        else this.flash(st.mode === "online" ? "AI 已连接" : "本地模拟模式（没接 AI），可以在设置里接上");
+      };
+    }
     const unread = this.game.conflicts.some((c) => !c.resolved);
     this.els["feed-dot"].hidden = !unread;
   }
@@ -507,7 +584,9 @@ export class UI {
     const p = this.page(`
       <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>后台权限</h2></header>
       <div class="page-body">
-        <p class="perm-intro">${first ? "欢迎来到窝窝！" : ""}想让家里的人在你不看手机的时候也照常生活、给你发消息，需要开几项权限。能直接开的点一下就好，其余的会带你去系统设置。</p>
+        <p class="perm-intro">${first ? "欢迎来到窝窝！" : ""}想让家里的人在你不看手机的时候也照常生活、给你发消息，需要开几项权限。</p>
+        <button class="btn primary block perm-all" id="perm-all">一键获取权限</button>
+        <p class="help" style="margin:6px 0 14px">会依次弹出系统的授权窗口，都选「允许」就好；个别项目系统不给弹窗，会直接打开那一页的设置，把开关打开后返回即可。</p>
         <div class="perm-list" id="perm-list"><div class="help">正在检查…</div></div>
         <button class="btn primary block" id="perm-done">${first ? "好了，开始吧" : "完成"}</button>
       </div>`, () => { this.refreshPermissionGuide = undefined; });
@@ -547,6 +626,14 @@ export class UI {
       }));
     };
     this.refreshPermissionGuide = () => void render();
+    p.querySelector<HTMLElement>("#perm-all")!.onclick = async () => {
+      const b = p.querySelector<HTMLButtonElement>("#perm-all")!;
+      b.disabled = true; b.textContent = "正在获取…";
+      try { await api.requestAll(); } finally { b.disabled = false; b.textContent = "一键获取权限"; }
+      await render();
+      const st = await api.status().catch(() => null);
+      if (st && st.notifications && st.battery && (st.sdk < 31 || st.exactAlarm)) this.flash(autostartDone ? "权限都开好了" : "系统权限都开好了，再按下面的提示把「自启动」打开就齐了");
+    };
     void render();
     p.querySelector<HTMLElement>("#perm-done")!.onclick = () => {
       try { localStorage.setItem("wowo-perm-guide", "1"); } catch { /* 无所谓 */ }
@@ -1052,6 +1139,12 @@ export class UI {
         <div class="field"><label for="s-feeds">新闻来源（每行：名称 | 分类 | RSS 地址）</label>
           <textarea id="s-feeds" style="min-height:80px">${esc(s.news.feeds.map((f) => `${f.name} | ${f.category} | ${f.url}`).join("\n"))}</textarea></div>
         <div class="field"><label for="s-block">屏蔽词（逗号分隔）</label><input id="s-block" value="${esc(s.news.blockedWords.join("，"))}" /></div>
+        <h3 class="group">外观</h3>
+        <div class="field"><label>配色</label>
+          <div class="palette-pick">${PALETTES.map(([id, name, c]) => `<button type="button" class="pal ${s.look.palette === id ? "on" : ""}" data-pal="${id}" style="--c:${c}" aria-label="${name}"><i></i><span>${name}</span></button>`).join("")}</div></div>
+        <div class="field"><label for="s-mode">深色模式</label>
+          <select id="s-mode">${[["light", "浅色"], ["dark", "深色"], ["system", "跟随手机系统"], ["time", "跟随时间（天黑后自动变深色）"]].map(([v, n]) => `<option value="${v}" ${s.look.mode === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <label class="switch"><input type="checkbox" id="s-tint" ${s.look.timeTint ? "checked" : ""} /><span>界面颜色跟着时间变化（清晨偏粉、傍晚偏橙、夜里偏蓝）</span></label>
         <h3 class="group">手机</h3>
         <div class="help" style="margin-bottom:8px">安卓版才有用。你没在看的时候，角色会按时间和自己的状态给你发消息，消息会变成手机通知，点通知能直接聊天，也能在通知里回复。</div>
         <label class="switch"><input type="checkbox" id="s-keep" ${s.phone.keepAlive ? "checked" : ""} /><span>后台常驻（通知栏会有一条常驻消息，角色在你不看的时候也照常生活）</span></label>
@@ -1062,7 +1155,11 @@ export class UI {
           <div class="field"><label for="s-qe">到几点</label><input id="s-qe" type="number" inputmode="numeric" min="0" max="23" value="${s.phone.quietEnd}" /></div>
         </div>
         <div class="help">两个数一样表示不设免打扰。</div>
-        ${this.permissions ? `<button type="button" class="btn block" id="s-perm">后台权限设置</button><div class="help">检查通知、省电限制、准时提醒、自启动这些权限有没有开好。</div>` : ""}
+        ${this.permissions ? `<button type="button" class="btn primary block" id="s-perm-all">一键获取权限</button><div class="help">依次弹出通知、不受省电限制等系统授权窗口，选「允许」就好。</div>
+        <button type="button" class="btn block" id="s-perm" style="margin-top:8px">查看各项权限</button><div class="help">逐项检查有没有开好，包括要手动打开的「自启动」。</div>` : ""}
+        <h3 class="group">日志</h3>
+        <button type="button" class="btn block" id="s-log">查看和导出日志</button>
+        <div class="help">AI 出错、程序报错时会记在这里，导出来发给开发者就能查原因。不会记 API Key 和聊天内容。</div>
         <h3 class="group">画面和测试</h3>
         <label class="switch"><input type="checkbox" id="s-walls" ${s.wallMode === "full" ? "checked" : ""} /><span>房间之间的墙显示成高墙</span></label>
         <div class="field"><label for="s-hour">画面时间</label>
@@ -1071,7 +1168,7 @@ export class UI {
         <div class="field"><label for="s-scale">时间倍率（测试用）</label><input id="s-scale" type="number" inputmode="numeric" min="1" max="600" value="${s.timeScale}" />
           <div class="help">1 = 和现实同步。调大后饥饿、困倦和动作时长都会加快；作息和节日仍按现实时钟。</div></div>
         <button class="btn danger block" id="s-reset">重置存档</button>
-      </div>`);
+      </div>`, () => this.applyLook()); // 没保存就关掉：恢复原来的配色
     const $ = <T extends HTMLElement>(sel: string) => p.querySelector<T>(sel)!;
     const HELP: Record<string, string> = {
       mock: "不调用任何 AI，角色按本地规则生活。",
@@ -1098,6 +1195,20 @@ export class UI {
       }
     };
     p.querySelector<HTMLElement>("#s-perm")?.addEventListener("click", () => this.openPermissionGuide(false));
+    $("#s-log").onclick = () => this.openLog();
+    p.querySelector<HTMLElement>("#s-perm-all")?.addEventListener("click", async (ev) => {
+      const b = ev.currentTarget as HTMLButtonElement;
+      b.disabled = true; b.textContent = "正在获取…";
+      try { await this.permissions?.requestAll(); this.flash("好了。「自启动」系统不让直接弹窗，可以在「查看各项权限」里按提示打开"); }
+      finally { b.disabled = false; b.textContent = "一键获取权限"; }
+    });
+    // 点配色立刻预览
+    p.querySelectorAll<HTMLElement>(".pal").forEach((b) => (b.onclick = () => {
+      p.querySelectorAll(".pal").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      document.documentElement.dataset.palette = b.dataset.pal!;
+    }));
+    $<HTMLSelectElement>("#s-mode").onchange = () => { const old = s.look.mode; s.look.mode = $<HTMLSelectElement>("#s-mode").value as typeof s.look.mode; this.applyLook(); s.look.mode = old; };
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
     $("#s-save").onclick = () => {
       ai.provider = $<HTMLSelectElement>("#s-provider").value as typeof ai.provider;
@@ -1114,6 +1225,11 @@ export class UI {
       const ph = $<HTMLSelectElement>("#s-hour").value;
       s.previewHour = ph === "" ? null : Number(ph);
       s.timeScale = Math.min(600, Math.max(1, Number($<HTMLInputElement>("#s-scale").value) || 1));
+      s.look.mode = $<HTMLSelectElement>("#s-mode").value as typeof s.look.mode;
+      s.look.timeTint = $<HTMLInputElement>("#s-tint").checked;
+      const pal = p.querySelector<HTMLElement>(".pal.on")?.dataset.pal;
+      if (pal) s.look.palette = pal as typeof s.look.palette;
+      this.applyLook();
       s.phone.keepAlive = $<HTMLInputElement>("#s-keep").checked;
       s.phone.proactive = $<HTMLSelectElement>("#s-pro").value as typeof s.phone.proactive;
       const hr = (id: string, dflt: number) => { const v = Number($<HTMLInputElement>(id).value); return Number.isFinite(v) ? Math.min(23, Math.max(0, Math.round(v))) : dflt; };

@@ -66,7 +66,7 @@ export class Game {
       if (raw) {
         const data = JSON.parse(raw) as SaveData;
         const def = defaultSettings();
-        data.settings = { ...def, ...data.settings, ai: { ...def.ai, ...data.settings?.ai }, news: { ...def.news, ...data.settings?.news }, phone: { ...def.phone, ...data.settings?.phone } };
+        data.settings = { ...def, ...data.settings, ai: { ...def.ai, ...data.settings?.ai }, news: { ...def.news, ...data.settings?.news }, phone: { ...def.phone, ...data.settings?.phone }, look: { ...def.look, ...data.settings?.look } };
         return new Game(data);
       }
     } catch (e) {

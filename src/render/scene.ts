@@ -684,8 +684,10 @@ export class Scene {
     const w = this.game.world;
     const rooms = this.roomBoxes();
     const lit = new Set(this.game.chars.filter((c) => !c.hidden).map((c) => c.room));
+    // 看单个房间时，旁边调暗的房间不画灯光，免得光晕叠在画面上
+    const only = this.view.mode === "room" ? this.view.name : null;
     for (const [name, r] of rooms) {
-      if (r.outdoor || !lit.has(name)) continue;
+      if (r.outdoor || !lit.has(name) || (only && name !== only)) continue;
       // 天花板的灯：整间房暖暖的
       const a = toScreen(r.x0, r.y0), b = toScreen(r.x1, r.y1);
       g.rect(a.x, a.y - WALL_H * 0.3, b.x - a.x, b.y - a.y + WALL_H * 0.3).fill({ color: 0xffa94d, alpha: 0.22 * dl.night });
@@ -693,6 +695,7 @@ export class Scene {
       g.ellipse(c.x, c.y, (b.x - a.x) * 0.42, (b.y - a.y) * 0.42).fill({ color: 0xffc070, alpha: 0.14 * dl.night });
     }
     for (const f of w.data.furniture) {
+      if (only && w.roomOf(f.x, f.y) !== only) continue;
       const glowColor = (f.def === "lamp" || f.def === "lamp_desk") && f.state?.on ? 0xffc46a : f.def === "red_lantern" ? 0xff5a40 : f.def === "christmas_tree" ? 0xfff0a0 : f.def === "fish_tank" ? 0x7fd8ff : 0;
       if (!glowColor) continue;
       const c = toScreen(f.x + 0.5, f.y + 0.6);
@@ -700,8 +703,8 @@ export class Scene {
       for (const [rad, al] of [[70, 0.12], [42, 0.16], [20, 0.22]] as const) g.circle(c.x, c.y - up, rad).fill({ color: glowColor, alpha: al * dl.night });
     }
     // 萤火虫
-    for (const [, r] of rooms) {
-      if (!r.outdoor) continue;
+    for (const [name, r] of rooms) {
+      if (!r.outdoor || (only && name !== only)) continue;
       const n = Math.round((r.x1 - r.x0) * (r.y1 - r.y0) / 3);
       for (let i = 0; i < n; i++) {
         const sx = r.x0 + ((i * 0.618 + Math.sin(t * 0.3 + i)) % 1 + 1) % 1 * (r.x1 - r.x0);

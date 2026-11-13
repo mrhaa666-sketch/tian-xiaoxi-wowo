@@ -20,6 +20,8 @@ export async function postJSON(url: string, headers: Record<string, string>, bod
         body: JSON.stringify({ url, headers, body: payload }),
       });
   const text = await r.text();
+  // 网页版的请求要经过电脑上 npm run dev 才有的转发地址；在试玩网页、手机浏览器里没有它
+  if (!isNative() && r.status === 404 && /^\s*</.test(text)) throw new Error("NO_PROXY");
   let json: unknown = null;
   try { json = JSON.parse(text); } catch { /* 不是 JSON */ }
   return { status: r.status, json, text };

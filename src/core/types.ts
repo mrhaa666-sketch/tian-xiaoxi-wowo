@@ -253,6 +253,14 @@ export interface Settings {
   /** 画面时间预览：空 = 跟着现实时间；数字 = 固定在这个钟点（只影响画面光线） */
   previewHour?: number | null;
   phone: PhoneSettings;
+  look: LookSettings;
+}
+
+/** 界面外观 */
+export interface LookSettings {
+  palette: "pink" | "purple" | "blue" | "green" | "orange" | "berry";
+  mode: "light" | "dark" | "system" | "time"; // time = 天黑后自动变深色
+  timeTint: boolean;                          // 界面底色跟着清晨、白天、傍晚、夜晚微微变化
 }
 
 /** 手机（安卓版）：后台常驻和主动发消息 */

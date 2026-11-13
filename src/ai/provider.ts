@@ -2,6 +2,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AISettings } from "../core/types";
 import { postJSON } from "../core/net";
+import { dlog } from "../core/log";
+
+/** 把 AI 服务返回的错误码翻译成看得懂的话 */
+function explainStatus(status: number, text: string, provider: string): { msg: string; kind: AIError["kind"] } {
+  const detail = (() => { try { const j = JSON.parse(text); return String(j?.error?.message ?? j?.message ?? "").slice(0, 120); } catch { return text.slice(0, 120); } })();
+  if (status === 401 || status === 403) return { msg: "API Key 不对或没有权限，去设置里检查一下", kind: "auth" };
+  if (status === 402) return { msg: provider === "deepseek" ? "DeepSeek 账户余额不足，去 platform.deepseek.com 充值后再试" : "账户余额不足，充值后再试", kind: "auth" };
+  if (status === 404) return { msg: `找不到这个模型或地址（检查服务地址和模型名）：${detail}`, kind: "other" };
+  if (status === 422 || status === 400) return { msg: `请求参数不对（多半是模型名填错了）：${detail}`, kind: "other" };
+  if (status === 429) return { msg: "请求太频繁，被限流了", kind: "rate" };
+  if (status >= 500) return { msg: `AI 服务那边出了问题（${status}），稍后会自动重试`, kind: "network" };
+  return { msg: `AI 服务出错（${status}）：${detail}`, kind: "other" };
+}
 
 export interface LLMRequest {
   tier: "fast" | "chat"; // fast = 日常行为决策，chat = 和主人聊天
@@ -63,6 +76,7 @@ export class AnthropicLLM implements LLM {
       const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
       return parseJSONLoose(text);
     } catch (e) {
+      dlog("error", "AI", `Claude ${model}：${e instanceof Error ? e.message : String(e)}`);
       if (e instanceof AIError) throw e;
       if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) throw new AIError("API Key 无效或没有权限", "auth");
       if (e instanceof Anthropic.RateLimitError) throw new AIError("请求太频繁，被限流了", "rate");
@@ -111,21 +125,33 @@ export class OpenAICompatLLM implements LLM {
       messages: [{ role: "system", content: req.system + format }, ...req.messages],
     };
     if (this.jsonMode) body.response_format = { type: "json_object" };
+    const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+    const t0 = Date.now();
     let r;
     try {
       r = await postJSON(url, { "content-type": "application/json", authorization: `Bearer ${this.s.apiKey}` }, body);
-    } catch {
+    } catch (e) {
+      if (e instanceof Error && e.message === "NO_PROXY") {
+        dlog("error", "AI", `${host}：网页版连不上（试玩网页和手机浏览器里没有转发服务）`);
+        throw new AIError("网页版只有在电脑上用 npm run dev 打开时才能连 AI；请用安卓版", "network");
+      }
+      dlog("error", "AI", `${host} ${model}：连不上（${e instanceof Error ? e.message : String(e)}）`);
       throw new AIError("连不上 AI 服务，检查一下网络和服务地址", "network");
     }
+    dlog(r.status < 400 ? "info" : "error", "AI", `${host} ${model} ${req.tier === "chat" ? "聊天" : "做决定"} → ${r.status}，${Date.now() - t0}ms${r.status >= 400 ? `：${r.text.slice(0, 300)}` : ""}`);
     if (r.status === 400 && this.jsonMode) {
+      dlog("warn", "AI", "这个模型不支持 JSON 模式，改为只靠提示词约束格式");
       this.jsonMode = false;
       return this.complete(req);
     }
-    if (r.status === 401 || r.status === 403) throw new AIError("API Key 无效或没有权限", "auth");
-    if (r.status === 429) throw new AIError("请求太频繁，被限流了", "rate");
-    if (r.status >= 400) throw new AIError(`AI 服务出错（${r.status}）：${r.text.slice(0, 200)}`, "other");
+    if (r.status >= 400) { const ex = explainStatus(r.status, r.text, this.s.provider); throw new AIError(ex.msg, ex.kind); }
     const content = (r.json as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message?.content ?? "";
-    return parseJSONLoose(content);
+    try {
+      return parseJSONLoose(content);
+    } catch (e) {
+      dlog("error", "AI", `回复不是有效的 JSON：${content.slice(0, 300) || "（空回复）"}`);
+      throw e;
+    }
   }
 }
 

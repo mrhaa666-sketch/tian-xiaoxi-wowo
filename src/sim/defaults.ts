@@ -157,6 +157,7 @@ export function defaultSettings(): Settings {
     },
     timeScale: 1,
     phone: { keepAlive: true, proactive: "normal", quietStart: 0, quietEnd: 8 },
+    look: { palette: "pink", mode: "light", timeTint: false },
     wallMode: "cutaway",
   };
 }

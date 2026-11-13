@@ -10,6 +10,7 @@ import { mockChat, mockDecide, type Decision } from "./mock";
 import { CHARACTER_SCHEMA, CHARACTER_SYSTEM, CHAT_SCHEMA, CHAT_SYSTEM, DECISION_SCHEMA, DECISION_SYSTEM, buildContext } from "./prompts";
 import { FOODS, FURNITURE } from "../world/catalog";
 import { AIError, makeLLM, type LLM } from "./provider";
+import { dlog } from "../core/log";
 
 export type AIStatus = { mode: "mock" | "online" | "error"; message: string; callsLastMinute: number; thinking: number };
 
@@ -31,6 +32,8 @@ export class Brain {
   reconfigure() {
     this.llm = makeLLM(this.game.settings.ai);
     this.pauseUntil = 0;
+    const ai = this.game.settings.ai;
+    dlog("info", "设置", ai.provider === "mock" || !ai.apiKey ? "AI：本地模拟模式" : `AI：${ai.provider}，日常 ${ai.fastModel}，聊天 ${ai.chatModel}${ai.provider !== "anthropic" ? `，地址 ${ai.baseUrl || "（默认）"}` : ""}，Key ${ai.apiKey ? `已填（${ai.apiKey.length} 位）` : "没填"}`);
     this.setStatus(this.llm ? "online" : "mock", this.llm ? "AI 已连接" : "本地模拟模式");
   }
 
@@ -134,6 +137,7 @@ export class Brain {
   private handleError(e: unknown) {
     const err = e instanceof AIError ? e : new AIError(String(e), "other");
     console.warn("AI 调用失败：", err);
+    dlog("error", "AI", `调用失败（${err.kind}）：${err.message}`);
     if (err.kind === "auth") {
       this.pauseUntil = Date.now() + 10 * 60_000;
       this.setStatus("error", "API Key 无效，已暂停 AI（去设置里检查）");
