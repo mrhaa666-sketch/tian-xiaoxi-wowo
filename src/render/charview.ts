@@ -146,6 +146,10 @@ export interface SpriteManifest {
 }
 
 const manifests = new Map<string, Promise<SpriteManifest | null>>();
+/** 立绘更新了：清掉缓存，场景里用这套立绘的角色会重新加载 */
+const staleSprites = new Set<string>();
+export function invalidateSprites(id: string) { manifests.delete(id); staleSprites.add(id); }
+export function takeStale(id: string) { const s = staleSprites.has(id); staleSprites.delete(id); return s; }
 /** 读取 packs/chars/<id>/manifest.json；没有就返回 null */
 export function loadManifest(id: string): Promise<SpriteManifest | null> {
   let p = manifests.get(id);
@@ -175,6 +179,8 @@ export class SpriteSkin implements CharSkin {
   private lastEmo = "";
   private emoSince = 0;
   private lastThought = "";
+  private lastY = 0;
+  private goingAway = false;
   private marks = new Graphics();
   private markText = new Text({ text: "", resolution: 3, style: { fontFamily: "ZCOOL KuaiLe, Noto Sans SC, sans-serif", fontWeight: "900", fontSize: 20, fill: 0xffffff } });
 
@@ -226,11 +232,19 @@ export class SpriteSkin implements CharSkin {
     const speaking = !!c.speech;
     if (now > this.nextBlink + 140) this.nextBlink = now + 2500 + Math.random() * 3500;
     const blinking = now > this.nextBlink;
+    // 往哪边走：y 变小就是往远处（背对镜头）走
+    const dy = c.d.pos.y - this.lastY;
+    this.lastY = c.d.pos.y;
+    if (c.moving && Math.abs(dy) > 0.0005) this.goingAway = dy < 0;
+    else if (!c.moving) this.goingAway = false;
     let key: string;
     if (m.frames) {
       const f = m.frames;
       key = speaking && f.talk ? f.talk : f[emo] ?? f.normal;
       if (blinking && !speaking && key === f.normal && f.blink) key = f.blink;
+      // 背影：往远处走时左右脚交替；用背对镜头的家具时站着的背影
+      if (f.back && c.moving && this.goingAway) key = Math.sin(t * 10) > 0 ? f.back : f.backStep ?? f.back;
+      else if (f.back && c.back && !c.moving) key = f.back;
     } else {
       key = this.composedKey(m, emo, speaking, blinking);
     }

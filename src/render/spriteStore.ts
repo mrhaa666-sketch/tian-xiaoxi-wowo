@@ -66,6 +66,21 @@ export async function saveSprites(id: string, files: Record<string, string>) {
   }
 }
 
+/** 删掉浏览器里存的某套立绘（之后改用 packs 文件夹里的） */
+export async function deleteSprites(id: string) {
+  const keys = [...urls.keys()].filter((k) => k.startsWith(`${id}/`));
+  try {
+    const db = await open();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE, "readwrite");
+      for (const k of keys) tx.objectStore(STORE).delete(k);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch { /* 没有数据库就算了 */ }
+  for (const k of keys) { URL.revokeObjectURL(urls.get(k)!); urls.delete(k); }
+}
+
 /** 读出一套立绘的全部文件（导出角色包用） */
 export async function readSprites(id: string): Promise<Record<string, string> | null> {
   try {

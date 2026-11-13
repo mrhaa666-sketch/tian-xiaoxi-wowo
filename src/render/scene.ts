@@ -12,7 +12,7 @@ import type { Game } from "../sim/game";
 import { FLOOR_BY, FOOD_COLORS } from "./palette";
 import { FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
 import { footprint, key } from "../world/world";
-import { ProceduralSkin, SpriteSkin, type CharSkin } from "./charview";
+import { ProceduralSkin, SpriteSkin, takeStale, type CharSkin } from "./charview";
 import { drawStandee } from "./standees";
 import { TH, TW, WALL_H, WALL_LOW, hex, shade, toGrid, toScreen } from "./iso";
 
@@ -591,7 +591,7 @@ export class Scene {
       let skin = this.skins.get(c.id);
       // 换了立绘（或去掉立绘）时重建
       const want = c.d.sprites ?? "";
-      if (skin && (skin instanceof SpriteSkin ? skin.spritesId : "") !== want) {
+      if (skin && ((skin instanceof SpriteSkin ? skin.spritesId : "") !== want || (want && takeStale(want)))) {
         skin.view.destroy({ children: true });
         this.skins.delete(c.id);
         skin = undefined;

@@ -285,6 +285,25 @@ export class Game {
   }
 
   /** 主人强制让角色回床上休息（比如生病还硬撑着工作） */
+  /** 主人安排角色去用某件家具。成功返回 null，做不到返回原因 */
+  assign(c: Character, uid: string, interactionId: string): string | null {
+    const f = this.world.getFurniture(uid);
+    const def = f && FURNITURE_BY_ID[f.def];
+    const it = def?.interactions.find((i) => i.id === interactionId);
+    if (!f || !def || !it) return "这件家具不在了";
+    const occ = this.occupantOf(uid);
+    if (occ && occ !== c) return `${occ.name}正在用${def.name}`;
+    if (it.tags?.includes("eat") && !this.world.foodsOn(uid).some((x) => !x.forChar || x.forChar === c.id)) return "桌上还没有饭，先喂饭或者让人做饭吧";
+    const minutes = Math.min(60, Math.round((it.minutes[0] + it.minutes[1]) / 2));
+    c.setPlan([{ do: "use", target: uid, interaction: interactionId, minutes }]);
+    // 这段时间里 TA 不会自己改主意（只会回一句话）
+    c.forcedUntil = Date.now() + 10_000 + Math.min(30 * 60_000, (minutes * 60_000) / this.settings.timeScale);
+    this.log("player", `让${c.name}去${it.name}（${def.name}）`);
+    this.emit(c, `主人让你去${it.name}（${def.name}）。你已经在去的路上了，用一句话回应主人就好。`, 3);
+    this.changed();
+    return null;
+  }
+
   sendToBed(c: Character) {
     const beds = this.world.data.furniture.filter((f) => f.def === "bed" && !this.occupantOf(f.uid));
     if (!beds.length) {

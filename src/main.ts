@@ -282,6 +282,15 @@ async function boot() {
       return;
     }
     const c = scene.pickCharacter(p.x, p.y);
+    // 已经选中了一个角色、这次点的是家具：弹出这件家具能做的事，安排 TA 去做
+    if (!c && ui.selected) {
+      const f = scene.pickFurniture(p.x, p.y);
+      const who = game.byId(ui.selected);
+      if (f && who) {
+        const r = canvas.getBoundingClientRect(), pr = ui.els.phone.getBoundingClientRect();
+        if (ui.showFurnitureMenu(who, f.uid, p.x + r.left - pr.left, p.y + r.top - pr.top)) return;
+      }
+    }
     ui.select(c ? c.id : null);
   };
   canvas.addEventListener("pointerup", end);

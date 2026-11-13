@@ -50,6 +50,12 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
     plan.push({ do: "eat", minutes: 10 }, { do: "tell_player", line: "谢谢，很好吃。" });
     return { thought: "主人给我准备了饭。", emotion: "happy", plan };
   }
+  const order = events.find((e) => e.text.startsWith("主人让你去"));
+  if (order) {
+    const lazy = c.d.needs.energy < 25 || c.d.needs.mood < 30;
+    const line = pick(lazy ? ["……好吧。", "等我一下嘛。", "唔，知道了。"] : ["好～", "知道啦。", "这就去。", "嗯，好。", ...c.d.lore.catchphrases.slice(0, 1)]);
+    return { thought: "主人让我去做点事。", emotion, plan: [{ do: "say", line }] };
+  }
   const bed = events.find((e) => e.text.includes("赶回了床上"));
   if (bed) {
     const sb = c.d.lore.sickBehavior;

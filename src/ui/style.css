@@ -410,3 +410,15 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .chip.ai.err { color: var(--bad); border-color: var(--bad-line); background: var(--bad-soft); }
 .log-btns { display: flex; gap: 8px; margin-bottom: 10px; }
 .log-pre { white-space: pre-wrap; word-break: break-all; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; max-height: 70vh; overflow: auto; margin: 0; }
+.d-actions { grid-template-columns: repeat(5, 1fr); }
+.as-list { display: grid; gap: 8px; }
+.as-item { padding: 10px 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); display: grid; gap: 6px; }
+.as-name { display: flex; align-items: center; gap: 8px; }
+.as-busy { font-size: 11px; color: var(--warm-ink); background: var(--warm-soft); padding: 1px 8px; border-radius: 999px; }
+.as-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.as-btns .chip-btn:disabled { opacity: .4; }
+.fmenu { position: absolute; z-index: 30; min-width: 150px; padding: 6px; border-radius: 16px; background: var(--surface-solid); box-shadow: var(--shadow); border: 1px solid var(--line); display: grid; gap: 2px; }
+.fmenu-title { font-size: 12px; color: var(--muted); padding: 4px 10px 2px; }
+.fmenu button { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px; border-radius: 12px; text-align: left; font-weight: 700; }
+.fmenu button:active, .fmenu button:hover { background: var(--accent-soft); }
+.fmenu small { font-weight: 400; color: var(--muted); font-size: 11px; }

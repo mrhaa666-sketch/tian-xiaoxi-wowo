@@ -7,7 +7,7 @@ import { describeNow, hhmm } from "../core/time";
 import type { Character } from "../sim/character";
 import { PERSONA_TEMPLATE, SCHEDULE_TEMPLATE, defaultSettings, newCharacter, randomAppearance } from "../sim/defaults";
 import { Game } from "../sim/game";
-import { FLOORS, FOODS, FURNITURE, WALL_STYLES } from "../world/catalog";
+import { FLOORS, FOODS, FURNITURE, FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
 import { ROOM_PRESETS } from "../world/presets";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
@@ -79,7 +79,7 @@ export class UI {
   sheetFull = false;
   chatOpen: string | null = null;
   private typing = new Set<string>();
-  private els: Record<string, HTMLElement> = {};
+  els: Record<string, HTMLElement> = {};
   onSelect?: (id: string | null) => void;
   /** 视角切换：全景、某个房间、前后切换 */
   onView?: (v: { mode: "all" } | { mode: "room"; name: string } | { mode: "step"; dir: 1 | -1 }) => void;
@@ -205,6 +205,72 @@ export class UI {
     else if (this.sheet === "feed") this.renderLog();
     else body.innerHTML = "";
   }
+
+  /** 让角色去用某件家具（做完提示一句） */
+  private doAssign(c: Character, uid: string, itId: string) {
+    const err = this.game.assign(c, uid, itId);
+    if (err) { this.flash(err); return false; }
+    const f = this.game.world.getFurniture(uid)!;
+    const it = FURNITURE_BY_ID[f.def].interactions.find((i) => i.id === itId)!;
+    this.flash(`${c.name}去${it.name}了`);
+    return true;
+  }
+
+  /** 安排：按房间列出全家能用的家具和用法 */
+  openAssign(c: Character) {
+    const w = this.game.world;
+    const groups = new Map<string, string[]>();
+    for (const f of w.data.furniture) {
+      const def = FURNITURE_BY_ID[f.def];
+      const its = def?.interactions.filter((i) => i.id !== "toggle") ?? [];
+      if (!its.length) continue;
+      const occ = this.game.occupantOf(f.uid);
+      const busy = occ && occ !== c ? `<span class="as-busy">${esc(occ.name)}在用</span>` : "";
+      const hasFood = w.foodsOn(f.uid).some((x) => !x.forChar || x.forChar === c.id);
+      const btns = its.map((i) => {
+        const off = (occ && occ !== c) || (i.tags?.includes("eat") && !hasFood);
+        return `<button class="chip-btn" data-as="${f.uid}|${i.id}" ${off ? "disabled" : ""}>${esc(i.name)}</button>`;
+      }).join("");
+      const room = w.roomOf(f.x, f.y) || "其他";
+      if (!groups.has(room)) groups.set(room, []);
+      groups.get(room)!.push(`<div class="as-item"><div class="as-name"><b>${esc(def.name)}</b>${busy}</div><div class="as-btns">${btns}</div></div>`);
+    }
+    // 角色所在的房间排在最前面
+    const rooms = [...groups.keys()].sort((a, b) => (a === c.room ? -1 : b === c.room ? 1 : 0));
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>安排${esc(c.name)}做什么</h2></header>
+      <div class="page-body">
+        <p class="help" style="margin:0 0 12px">点一下，TA 就会走过去做。也可以在画面上先选中 TA，再点一件家具。</p>
+        ${rooms.map((r) => `<h3 class="group">${esc(r)}${r === c.room ? "（TA 在这里）" : ""}</h3><div class="as-list">${groups.get(r)!.join("")}</div>`).join("")}
+      </div>`);
+    p.querySelectorAll<HTMLButtonElement>("[data-as]").forEach((b) => (b.onclick = () => {
+      const [uid, it] = b.dataset.as!.split("|");
+      if (this.doAssign(c, uid, it)) p.close();
+    }));
+  }
+
+  /** 画面上选中角色后点家具：在点的位置弹出这件家具能做的事 */
+  showFurnitureMenu(c: Character, uid: string, x: number, y: number) {
+    this.closeFurnitureMenu();
+    const f = this.game.world.getFurniture(uid);
+    const def = f && FURNITURE_BY_ID[f.def];
+    const its = def?.interactions.filter((i) => i.id !== "toggle") ?? [];
+    if (!f || !def || !its.length) return false;
+    const menu = document.createElement("div");
+    menu.className = "fmenu";
+    menu.innerHTML = `<div class="fmenu-title">让${esc(c.name)}…</div>${its.map((i) => `<button data-fi="${i.id}">${esc(i.name)}<small>${esc(def.name)}</small></button>`).join("")}`;
+    const phone = this.els.phone;
+    phone.appendChild(menu);
+    const r = phone.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = `${Math.max(8, Math.min(r.width - mw - 8, x - mw / 2))}px`;
+    menu.style.top = `${Math.max(60, Math.min(r.height - mh - 120, y - mh - 16))}px`;
+    menu.querySelectorAll<HTMLElement>("[data-fi]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); this.doAssign(c, uid, b.dataset.fi!); this.closeFurnitureMenu(); }));
+    setTimeout(() => document.addEventListener("pointerdown", this.menuAway, { once: true, capture: true }), 0);
+    return true;
+  }
+  private menuAway = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".fmenu")) this.closeFurnitureMenu(); else document.addEventListener("pointerdown", this.menuAway, { once: true, capture: true }); };
+  closeFurnitureMenu() { this.els.phone.querySelectorAll(".fmenu").forEach((m) => m.remove()); }
 
   /** 安卓版：把文本存成文件并打开系统分享（发给微信、QQ，或保存到手机） */
   shareFile?: (name: string, text: string) => Promise<boolean>;
@@ -394,7 +460,8 @@ export class UI {
   private afterImport: (() => void) | null = null;
 
   private async applyPack(raw: unknown) {
-    const { added, problems } = await importPack(this.game, raw);
+    const { added, updated, problems } = await importPack(this.game, raw);
+    if (updated.length) { this.renderAll(); this.game.save(); }
     if (added.length && this.afterImport) {
       this.afterImport();
       const first = this.game.chars.find((c) => c.name === added[0]);
@@ -406,7 +473,7 @@ export class UI {
       this.renderRoster();
       this.game.save();
     }
-    const msg = added.length ? `导入了 ${added.join("、")}` : "没有导入任何角色";
+    const msg = [added.length ? `导入了 ${added.join("、")}` : "", updated.length ? `更新了 ${updated.join("、")} 的立绘` : ""].filter(Boolean).join("，") || "没有导入任何角色";
     if (problems.length) this.confirm(`${msg}。\n\n${problems.join("\n")}`, () => {});
     else this.flash(msg);
   }
@@ -458,6 +525,7 @@ export class UI {
       <div class="d-actions">
         <button class="act primary" id="act-chat">${icon("chat")}<span>聊天</span></button>
         <button class="act" id="act-feed">🍚<span>喂饭</span></button>
+        <button class="act" id="act-do">🪑<span>安排</span></button>
         <button class="act" id="act-bed">🛏️<span>去休息</span></button>
         <button class="act" id="act-edit">✏️<span>人设</span></button>
       </div>
@@ -471,6 +539,7 @@ export class UI {
     body.querySelectorAll<HTMLElement>("[data-food]").forEach((b) => (b.onclick = () => { this.game.feed(c, b.dataset.food!); $("#foods").hidden = true; this.flash(`给${c.name}准备了${FOODS.find((f) => f.id === b.dataset.food)?.name}`); }));
     $("#act-bed").onclick = () => { this.game.sendToBed(c); this.flash(`让${c.name}回床上休息`); };
     $("#act-edit").onclick = () => this.openEditor(c);
+    $("#act-do").onclick = () => this.openAssign(c);
     body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => (b.onclick = () => { this.tab = b.dataset.tab as UI["tab"]; this.renderDetail(); }));
     const tb = $("#tabbody");
     if (this.tab === "status") {

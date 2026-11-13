@@ -3,7 +3,8 @@ import type { Appearance, CharacterData, Lore, Profile, Skills, Traits } from ".
 import { FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
 import { defaultLore, newCharacter, randomAppearance } from "./defaults";
 import type { Game } from "./game";
-import { readSprites, saveSprites } from "../render/spriteStore";
+import { deleteSprites, readSprites, saveSprites } from "../render/spriteStore";
+import { invalidateSprites } from "../render/charview";
 
 /** 角色包里自带的立绘：id 是立绘名，files 是「文件名 → data: 地址」 */
 export interface PackSprites { id: string; files: Record<string, string> }
@@ -113,16 +114,27 @@ export function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
 }
 
 /** 导入角色包（也接受只有一个角色的对象）。返回加进来的角色名和问题列表。 */
-export async function importPack(game: Game, raw: unknown): Promise<{ added: string[]; problems: string[] }> {
+export async function importPack(game: Game, raw: unknown): Promise<{ added: string[]; updated: string[]; problems: string[] }> {
   const problems: string[] = [];
   const root = (raw ?? {}) as Record<string, unknown>;
   const list: unknown[] = Array.isArray(root.characters) ? root.characters : Array.isArray(raw) ? raw : root.name ? [root] : [];
-  if (!list.length) return { added: [], problems: ["文件里没有找到角色。请检查格式是否是角色包（见 docs/角色包格式.md）。"] };
+  if (!list.length) return { added: [], updated: [], problems: ["文件里没有找到角色。请检查格式是否是角色包（见 docs/角色包格式.md）。"] };
   const added: CharacterData[] = [];
+  const updated: string[] = [];
   const renamed = new Map<string, string>(); // 同一批里改过名的角色：原名 → 新名
   for (const item of list.slice(0, 20)) {
     const e = cleanEntry((item ?? {}) as Record<string, unknown>);
     if (!e) { problems.push("有一个角色没有名字，跳过了"); continue; }
+    // 家里已经有同名、用同一套立绘的角色：只更新立绘（比如补上背影），不再多搬进来一个
+    const spriteId = typeof e.sprites === "string" ? e.sprites : e.sprites?.id;
+    const same = spriteId && game.chars.find((c) => c.name === e.name && c.d.sprites === spriteId);
+    if (same) {
+      if (typeof e.sprites === "string") await deleteSprites(e.sprites); // 改用 packs 文件夹里的新立绘
+      else if (e.sprites) await saveSprites(e.sprites.id, e.sprites.files);
+      invalidateSprites(spriteId);
+      updated.push(e.name);
+      continue;
+    }
     let name = e.name;
     const names = new Set(game.chars.map((c) => c.name));
     for (let i = 2; names.has(name); i++) name = `${e.name}${i}`;
@@ -157,5 +169,5 @@ export async function importPack(game: Game, raw: unknown): Promise<{ added: str
       if (nd && (!cur || (cur.affinity === 0 && ["刚认识", "新来的"].includes(cur.note)))) o.d.relations[nd.id] = { affinity: r.affinity, note: r.note };
     }
   }
-  return { added: added.map((d) => d.name), problems };
+  return { added: added.map((d) => d.name), updated, problems };
 }

@@ -25,6 +25,8 @@ const FRAMES = {
   normal: ["pose_idle", "face_normal"], happy: ["face_happy"], sad: ["face_sad"], angry: ["face_angry"],
   surprised: ["face_surprised"], shy: ["face_shy"], sick: ["face_sick"], sleepy: ["face_sleepy"],
   talk: ["pose_talk"], blink: ["face_sleepy"],
+  // 背影：往远处走时两张交替，背对镜头用家具时用第一张
+  back: ["back_walk_a"], backStep: ["back_walk_b"],
 };
 
 for (const char of fs.readdirSync(args.in).filter((n) => fs.statSync(path.join(args.in, n)).isDirectory())) {
