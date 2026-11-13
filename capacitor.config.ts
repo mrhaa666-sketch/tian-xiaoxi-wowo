@@ -2,7 +2,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.tianxiaoxi.wowo",
-  appName: "恬小溪窝窝",
+  appName: "恬静小窝",
   webDir: "dist",
   android: {
     // 切到后台时不暂停网页里的计时器，角色才能继续生活、给主人发消息

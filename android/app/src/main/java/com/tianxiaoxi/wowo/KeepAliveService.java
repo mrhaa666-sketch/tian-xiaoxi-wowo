@@ -24,7 +24,7 @@ public class KeepAliveService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String title = intent != null && intent.hasExtra("title") ? intent.getStringExtra("title") : "恬小溪窝窝";
+        String title = intent != null && intent.hasExtra("title") ? intent.getStringExtra("title") : "恬静小窝";
         String text = intent != null && intent.hasExtra("text") ? intent.getStringExtra("text") : "大家在家里过日子";
         String big = intent != null && intent.hasExtra("big") ? intent.getStringExtra("big") : null;
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
@@ -32,7 +32,7 @@ public class KeepAliveService extends Service {
             nm.deleteNotificationChannel("keepalive");
             // 低等级：通知栏里一直看得到，但不响、不弹出
             NotificationChannel ch = new NotificationChannel(CHANNEL, "正在运行", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("通知栏里一直显示窝窝正在运行、大家在做什么，让系统不要把应用关掉");
+            ch.setDescription("通知栏里一直显示小窝正在运行、大家在做什么，让系统不要把应用关掉");
             ch.setShowBadge(false);
             ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             nm.createNotificationChannel(ch);

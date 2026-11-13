@@ -23,7 +23,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="恬小溪窝窝"
+            android:text="恬静小窝"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:textStyle="bold"

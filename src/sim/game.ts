@@ -104,7 +104,7 @@ export class Game {
       log: [], firedCues: {}, firedFestivals: {}, news: [], newsFetchedAt: 0, lastSeen: Date.now(),
     };
     const g = new Game(save);
-    g.log("system", "欢迎来到恬小溪窝窝。点角色可以查看和聊天，右上角可以建造和设置。");
+    g.log("system", "欢迎来到恬静小窝。点角色可以查看和聊天，右上角可以建造和设置。");
     return g;
   }
 

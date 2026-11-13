@@ -330,7 +330,7 @@ export class UI {
   openLog() {
     const ai = this.game.settings.ai;
     const text = () => formatLog({
-      版本: "恬小溪窝窝 " + (import.meta.env.MODE === "production" ? "正式构建" : "开发模式"),
+      版本: "恬静小窝 " + (import.meta.env.MODE === "production" ? "正式构建" : "开发模式"),
       AI: ai.provider === "mock" || !ai.apiKey ? "本地模拟" : `${ai.provider} / ${ai.fastModel} / ${ai.chatModel}${ai.provider !== "anthropic" ? ` / ${ai.baseUrl}` : ""}`,
       AI状态: `${this.brain.status.mode}：${this.brain.status.message}`,
       角色数: String(this.game.chars.length),
@@ -349,7 +349,7 @@ export class UI {
       catch { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel?.removeAllRanges(); sel?.addRange(r); this.flash("没能自动复制，已选中，长按复制"); }
     };
     p.querySelector<HTMLElement>("#lg-export")!.onclick = async () => {
-      const name = `恬小溪窝窝-日志-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.txt`;
+      const name = `恬静小窝-日志-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.txt`;
       await this.saveFile(name, text(), "text/plain");
     };
     p.querySelector<HTMLElement>("#lg-clear")!.onclick = () => this.confirm("清空所有日志？", () => { clearLog(); show(); });
@@ -1007,7 +1007,7 @@ export class UI {
     const p = this.page(`
       <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>后台权限</h2></header>
       <div class="page-body">
-        <p class="perm-intro">${first ? "欢迎来到窝窝！" : ""}想让家里的人在你不看手机的时候也照常生活、给你发消息，需要开几项权限。</p>
+        <p class="perm-intro">${first ? "欢迎来到小窝！" : ""}想让家里的人在你不看手机的时候也照常生活、给你发消息，需要开几项权限。</p>
         <button class="btn primary block perm-all" id="perm-all">一键获取权限</button>
         <p class="help" style="margin:6px 0 14px">会依次弹出系统的授权窗口，都选「允许」就好；个别项目系统不给弹窗，会直接打开那一页的设置，把开关打开后返回即可。</p>
         <div class="perm-list" id="perm-list"><div class="help">正在检查…</div></div>
@@ -1027,7 +1027,7 @@ export class UI {
         </div>`;
       box.innerHTML = [
         row("notify", st.notifications, "通知", "角色给你发的消息会变成手机通知。", "开启"),
-        row("battery", st.battery, "不受省电限制", "系统省电时不会把窝窝关掉。会弹出系统窗口，选「允许」。", "开启"),
+        row("battery", st.battery, "不受省电限制", "系统省电时不会把小窝关掉。会弹出系统窗口，选「允许」。", "开启"),
         st.sdk >= 31 ? row("exact", st.exactAlarm, "准时提醒", "到点的消息能准时送到。会打开系统设置，把开关打开。", "去设置") : "",
         autostartDone
           ? row("autostart", true, "自启动和后台运行", brandTip(st.manufacturer), "")
@@ -1738,7 +1738,7 @@ export class UI {
       this.game.save();
       const b = await makeBackup(this.game.toSave(), $<HTMLInputElement>("#s-bk-img").checked);
       const d = new Date();
-      await this.saveFile(`恬小溪窝窝存档-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}.json`, JSON.stringify(b));
+      await this.saveFile(`恬静小窝存档-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}.json`, JSON.stringify(b));
       this.flash("存档已导出");
     };
     $("#s-bk-in").onclick = () => {
@@ -1749,7 +1749,7 @@ export class UI {
         if (!f) return;
         let b: ReturnType<typeof parseBackup> = null;
         try { b = parseBackup(JSON.parse(await f.text())); } catch { /* 下面提示 */ }
-        if (!b) { this.flash("这个文件不是恬小溪窝窝的存档"); return; }
+        if (!b) { this.flash("这个文件不是恬静小窝的存档"); return; }
         const bk = b;
         this.confirm(`用这个存档覆盖现在的家？\n存档时间：${new Date(bk.createdAt).toLocaleString("zh-CN")}\n里面有：${bk.save.characters.map((c) => c.name).join("、") || "没有人"}\n\n现在的家会先自动备份一份，可以在「每天的备份」里找回。`, async () => {
           await autoBackup(this.game.toSave());

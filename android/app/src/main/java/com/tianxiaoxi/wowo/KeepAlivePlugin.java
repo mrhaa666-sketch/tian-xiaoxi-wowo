@@ -24,7 +24,7 @@ public class KeepAlivePlugin extends Plugin {
     @PluginMethod
     public void updateWidget(PluginCall call) {
         try {
-            WowoWidget.push(getContext(), call.getString("title", "恬小溪窝窝"), call.getString("body", ""), call.getString("time", ""));
+            WowoWidget.push(getContext(), call.getString("title", "恬静小窝"), call.getString("body", ""), call.getString("time", ""));
             call.resolve();
         } catch (Exception e) {
             call.reject("没能更新小组件：" + e.getMessage());
@@ -35,7 +35,7 @@ public class KeepAlivePlugin extends Plugin {
     public void start(PluginCall call) {
         Context ctx = getContext();
         Intent i = new Intent(ctx, KeepAliveService.class);
-        i.putExtra("title", call.getString("title", "恬小溪窝窝"));
+        i.putExtra("title", call.getString("title", "恬静小窝"));
         i.putExtra("text", call.getString("text", "大家在家里过日子"));
         if (call.getString("big") != null) i.putExtra("big", call.getString("big"));
         try {

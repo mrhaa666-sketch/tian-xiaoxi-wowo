@@ -45,7 +45,7 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
         <!-- 桌面小组件：看看大家在做什么 -->
-        <receiver android:name=".WowoWidget" android:exported="false" android:label="窝窝里的大家">
+        <receiver android:name=".WowoWidget" android:exported="false" android:label="小窝里的大家">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

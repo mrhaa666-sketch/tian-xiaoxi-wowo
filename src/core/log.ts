@@ -36,7 +36,7 @@ export function formatLog(extra: Record<string, string>) {
   const pad = (n: number) => String(n).padStart(2, "0");
   const ts = (t: number) => { const d = new Date(t); return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
   const head = [
-    "恬小溪窝窝 调试日志",
+    "恬静小窝 调试日志",
     `导出时间：${new Date().toLocaleString("zh-CN")}`,
     `设备：${navigator.userAgent}`,
     ...Object.entries(extra).map(([k, v]) => `${k}：${v}`),

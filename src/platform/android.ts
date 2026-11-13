@@ -65,7 +65,7 @@ async function notify(c: Character, text: string) {
       actionTypeId: "reply",
       group: `wowo-${c.id}`,
       largeBody: text,
-      summaryText: "窝窝里的消息",
+      summaryText: "小窝里的消息",
       autoCancel: true,
       extra: { charId: c.id },
     }],
@@ -124,7 +124,7 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
       const status = lines.join("\n");
       if (!force && status === lastStatus) return;
       lastStatus = status;
-      await KeepAlive.start({ title: `恬小溪窝窝正在运行 · ${awake}/${game.chars.length} 人醒着`, text, big: status || text }).catch(() => {});
+      await KeepAlive.start({ title: `恬静小窝正在运行 · ${awake}/${game.chars.length} 人醒着`, text, big: status || text }).catch(() => {});
     } else {
       lastStatus = "";
       await KeepAlive.stop().catch(() => {});
@@ -136,7 +136,7 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
     const awake = game.chars.filter((c) => !c.hidden).length;
     const body = game.chars.slice(0, 8).map((c) => `${c.hidden ? "💤" : "·"} ${c.name}　${c.room} · ${c.d.activity}`).join("\n") + (game.chars.length > 8 ? `\n……还有 ${game.chars.length - 8} 个人` : "");
     const d = new Date();
-    void KeepAlive.updateWidget({ title: `窝窝里 ${awake}/${game.chars.length} 人醒着`, body: body || "家里还没有人", time: `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` }).catch(() => {});
+    void KeepAlive.updateWidget({ title: `小窝里 ${awake}/${game.chars.length} 人醒着`, body: body || "家里还没有人", time: `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` }).catch(() => {});
   };
   syncWidget();
   setInterval(() => { void syncKeepAlive(false); syncWidget(); }, 60_000);
