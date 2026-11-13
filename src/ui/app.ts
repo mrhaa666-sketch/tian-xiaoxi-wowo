@@ -16,7 +16,6 @@ import { assetUrl } from "../render/assets";
 import { customFurniture, customRooms, exportFurniturePack, exportRoom, importHomePack, removeCustomFurniture, removeCustomRoom, setFurnitureTags } from "../world/homepack";
 import { TAG_GROUPS } from "../world/tags";
 import { GIFTS, GIFT_BY_ID } from "../world/gifts";
-import { stopSpeaking } from "../platform/voice";
 import { PET_COLOR, PET_COLORS } from "../sim/pets";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
@@ -1642,9 +1641,6 @@ export class UI {
           <select id="s-mode">${[["light", "浅色"], ["dark", "深色"], ["system", "跟随手机系统"], ["time", "跟随时间（天黑后自动变深色）"]].map(([v, n]) => `<option value="${v}" ${s.look.mode === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <div class="field"><label for="s-names">画面上的名字</label>
           <select id="s-names">${[["none", "不显示"], ["selected", "只显示选中的人"], ["all", "全部显示（跟着画面一起缩放）"]].map(([v, n]) => `<option value="${v}" ${s.look.names === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-        <div class="field"><label for="s-voice">语音朗读</label>
-          <select id="s-voice">${[["off", "不读"], ["player", "只读角色对我说的话（聊天、发来的消息）"], ["all", "画面里大家说的话也读"]].map(([v, n]) => `<option value="${v}" ${(s.look.voice ?? "off") === v ? "selected" : ""}>${n}</option>`).join("")}</select>
-          <div class="help">每个人的音高、语速不一样。手机要装了中文语音（系统设置 → 文字转语音）才读得出来。</div></div>
         <label class="switch"><input type="checkbox" id="s-tint" ${s.look.timeTint ? "checked" : ""} /><span>界面颜色跟着时间变化（清晨偏粉、傍晚偏橙、夜里偏蓝）</span></label>
         <h3 class="group">手机</h3>
         <div class="help" style="margin-bottom:8px">安卓版才有用。你没在看的时候，角色会按时间和自己的状态给你发消息，消息会变成手机通知，点通知能直接聊天，也能在通知里回复。</div>
@@ -1817,8 +1813,6 @@ export class UI {
       s.look.mode = $<HTMLSelectElement>("#s-mode").value as typeof s.look.mode;
       s.look.timeTint = $<HTMLInputElement>("#s-tint").checked;
       s.look.names = $<HTMLSelectElement>("#s-names").value as typeof s.look.names;
-      s.look.voice = $<HTMLSelectElement>("#s-voice").value as typeof s.look.voice;
-      if (s.look.voice === "off") void stopSpeaking();
       const pal = p.querySelector<HTMLElement>(".pal.on")?.dataset.pal;
       if (pal) s.look.palette = pal as typeof s.look.palette;
       this.applyLook();

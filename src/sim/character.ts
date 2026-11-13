@@ -55,11 +55,9 @@ export class Character {
     if (e) this.d.emotion = e;
   }
 
-  /** 说一句话（头上冒气泡）。toPlayer = 是对主人说的（聊天回复、发给主人的消息） */
-  say(text: string, seconds = 5, toPlayer = false) {
+  say(text: string, seconds = 5) {
     if (!text) return;
     this.speech = { text, until: performance.now() + Math.max(seconds, 2 + text.length * 0.25) * 1000 };
-    this.game.onSay?.(this, text, toPlayer);
   }
 
   showEmote(icon: string, seconds = 3) {
