@@ -1587,6 +1587,7 @@ export class UI {
             <option value="openai" ${ai.provider === "openai" ? "selected" : ""}>其他兼容 OpenAI 格式的服务</option>
           </select><div class="help" id="s-provider-help"></div></div>
         <div class="field"><label for="s-key">API Key</label><input id="s-key" type="password" value="${esc(ai.apiKey)}" autocomplete="off" />
+          <div class="help" id="s-key-check"></div>
           <div class="help">只保存在这台设备上，只会发给你选择的 AI 服务。</div></div>
         <div class="field" id="s-base-wrap"><label for="s-base">服务地址</label><input id="s-base" value="${esc(ai.baseUrl)}" inputmode="url" /><div class="help">例如 https://api.deepseek.com/v1</div></div>
         <div class="field"><label for="s-fast">日常行为用的模型</label><input id="s-fast" value="${esc(ai.fastModel)}" /><div class="help">调用最频繁，建议用便宜快速的</div></div>
@@ -1782,7 +1783,17 @@ export class UI {
       this.flash(ok ? "发了一条测试通知，看看手机顶上" : "通知权限还没开，先允许通知");
     };
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？（会先自动备份一份，后悔了可以在「每天的备份」里找回）", async () => { await autoBackup(this.game.toSave()); this.game.frozen = true; Game.wipe(); location.reload(); });
+    // 填 Key 时当场检查：常见的填错（把服务地址、模型名填进来，或者只复制了一半）直接指出来
+    const keyEl = $<HTMLInputElement>("#s-key"), keyCheck = $("#s-key-check"), provEl = $<HTMLSelectElement>("#s-provider");
+    const showKeyCheck = () => {
+      const k = keyEl.value.trim(), prob = keyProblem(provEl.value, k);
+      keyCheck.textContent = !k ? "" : prob ? `⚠ ${prob}` : `已填 ${k.length} 位，开头 ${k.slice(0, 3)}…`;
+      keyCheck.style.color = prob ? "#d0453f" : "";
+    };
+    keyEl.addEventListener("input", showKeyCheck); provEl.addEventListener("change", showKeyCheck); showKeyCheck();
     $("#s-save").onclick = () => {
+      const keyProb = keyProblem($<HTMLSelectElement>("#s-provider").value, $<HTMLInputElement>("#s-key").value.trim());
+      if (keyProb) { this.flash(keyProb); keyEl.focus(); return; }
       ai.provider = $<HTMLSelectElement>("#s-provider").value as typeof ai.provider;
       ai.apiKey = $<HTMLInputElement>("#s-key").value.trim();
       ai.baseUrl = $<HTMLInputElement>("#s-base").value.trim();
@@ -1826,4 +1837,16 @@ export class UI {
       this.flash("设置已保存");
     };
   }
+}
+
+/** API Key 明显填错了吗？返回要提示的话；看不出问题返回 null */
+export function keyProblem(provider: string, key: string): string | null {
+  if (provider === "mock" || !key) return null;
+  if (/^https?:\/\//i.test(key) || /\.(com|cn|ai|net|io)(\/|$)/i.test(key)) return "这里填的是网址。API Key 是一串字母数字，网址要填在下面的「服务地址」里";
+  if (/\s/.test(key)) return "Key 中间有空格或换行，重新复制一次";
+  if (/[^\x21-\x7e]/.test(key)) return "Key 里有中文或全角字符，应该只有英文字母、数字和符号";
+  if (provider === "deepseek" && !/^sk-[A-Za-z0-9]{20,}$/.test(key)) return "DeepSeek 的 Key 是 sk- 开头的一长串（一般 35 位），在 platform.deepseek.com 的「API keys」里创建后复制";
+  if (provider === "anthropic" && !key.startsWith("sk-ant-")) return "Claude 的 Key 是 sk-ant- 开头的，在 console.anthropic.com 创建";
+  if (key.length < 16) return `Key 只有 ${key.length} 位，太短了，可能没复制全`;
+  return null;
 }

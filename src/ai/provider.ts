@@ -8,7 +8,7 @@ import { recordCall } from "./usage";
 /** 把 AI 服务返回的错误码翻译成看得懂的话 */
 function explainStatus(status: number, text: string, provider: string): { msg: string; kind: AIError["kind"] } {
   const detail = (() => { try { const j = JSON.parse(text); return String(j?.error?.message ?? j?.message ?? "").slice(0, 120); } catch { return text.slice(0, 120); } })();
-  if (status === 401 || status === 403) return { msg: "API Key 不对或没有权限，去设置里检查一下", kind: "auth" };
+  if (status === 401 || status === 403) return { msg: provider === "deepseek" ? "DeepSeek 说 API Key 不对：要填 platform.deepseek.com「API keys」里 sk- 开头的那串" : "API Key 不对或没有权限，去设置里检查一下", kind: "auth" };
   if (status === 402) return { msg: provider === "deepseek" ? "DeepSeek 账户余额不足，去 platform.deepseek.com 充值后再试" : "账户余额不足，充值后再试", kind: "auth" };
   if (status === 404) return { msg: `找不到这个模型或地址（检查服务地址和模型名）：${detail}`, kind: "other" };
   if (status === 422 || status === 400) return { msg: `请求参数不对（多半是模型名填错了）：${detail}`, kind: "other" };
