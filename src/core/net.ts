@@ -1,6 +1,6 @@
 // 网络请求的统一出口。
-// 电脑上开发时，跨域请求经由 Vite 的本地代理（/api/fetch、/api/proxy）；
-// 安卓版（Capacitor）开启原生 HTTP 后可以直接请求，不受跨域限制。
+// 安卓（Capacitor）开启了原生 HTTP，可以直接请求，不受跨域限制。
+// 电脑上用 npm run dev 开发预览时，请求经由 Vite 的本地代理（/api/fetch、/api/proxy）。
 
 const isNative = () => !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
 

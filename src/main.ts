@@ -54,7 +54,7 @@ async function boot() {
   };
   window.addEventListener("resize", () => setTimeout(() => scene.refit(true), 50));
   ui.onSettingsChanged = () => brain.reconfigure();
-  // 安卓版：后台常驻、手机通知（网页版里什么都不做）
+  // 安卓：后台常驻、手机通知
   void initAndroid(game, brain, ui);
   brain.onStatus = () => ui.renderTop();
   game.onDiaryDue = (c, day) => { void brain.writeDiary(c, day); };
@@ -324,14 +324,6 @@ async function boot() {
   };
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  // 双击房间：进入单间
-  canvas.addEventListener("dblclick", (e) => {
-    if (ui.build.on) return;
-    const r = canvas.getBoundingClientRect();
-    const g = scene.screenToGrid(e.clientX - r.left, e.clientY - r.top);
-    const room = game.world.tile(Math.floor(g.x), Math.floor(g.y))?.room;
-    if (room) { scene.showRoom(room); setView(); }
-  });
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     const p = local(e);
@@ -417,8 +409,8 @@ async function boot() {
       navigator.vibrate?.(8);
       return;
     }
-    // 手机上双击空地：进入那个房间（电脑上有 dblclick）
-    if (!c && e.pointerType === "touch") {
+    // 双击空地：进入那个房间
+    if (!c) {
       const now = performance.now();
       if (lastTap && now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30) {
         lastTap = null;
@@ -441,19 +433,7 @@ async function boot() {
   };
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", (e) => { cancelPress(); dropGrab(0, 0, true); pointers.delete(e.pointerId); dragStart = null; paintStart = null; });
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const p = local(e);
-    scene.zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, p.x, p.y);
-  }, { passive: false });
-  window.addEventListener("keydown", (e) => {
-    if ((e.target as HTMLElement).closest("input, textarea, select")) return;
-    if (e.key === "r" || e.key === "R") ui.build.rot = ui.build.rot ? 0 : 1;
-    if (!ui.build.on && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { scene.stepRoom(e.key === "ArrowLeft" ? -1 : 1); setView(); }
-    if (e.key === "Escape") { if (ui.build.on) { ui.build.on = false; ui.renderBuild(); } else ui.select(null); }
-  });
-
-  // 方便在浏览器控制台里调试
+  // 方便调试（开发时在控制台里用）
   (window as unknown as { wowo: unknown }).wowo = { game, brain, scene, ui };
 }
 

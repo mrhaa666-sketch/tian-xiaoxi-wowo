@@ -274,7 +274,6 @@ export class Planner {
     };
     cv.addEventListener("pointerup", end);
     cv.addEventListener("pointercancel", (e) => { this.pointers.delete(e.pointerId); this.drag = null; });
-    cv.addEventListener("wheel", (e) => { e.preventDefault(); const r = cv.getBoundingClientRect(); this.zoomBy(e.deltaY < 0 ? 1.1 : 0.9, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
   }
 
   /** 点到的墙边上加门或去门（只能开在房间之间，或者房间朝外的墙上） */

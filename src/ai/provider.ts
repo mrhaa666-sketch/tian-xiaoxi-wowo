@@ -134,8 +134,8 @@ export class OpenAICompatLLM implements LLM {
       r = await postJSON(url, { "content-type": "application/json", authorization: `Bearer ${this.s.apiKey}` }, body);
     } catch (e) {
       if (e instanceof Error && e.message === "NO_PROXY") {
-        dlog("error", "AI", `${host}：网页版连不上（试玩网页和手机浏览器里没有转发服务）`);
-        throw new AIError("网页版只有在电脑上用 npm run dev 打开时才能连 AI；请用安卓版", "network");
+        dlog("error", "AI", `${host}：电脑上预览时要用 npm run dev 打开才能连 AI`);
+        throw new AIError("电脑上预览时要用 npm run dev 打开才能连 AI", "network");
       }
       dlog("error", "AI", `${host} ${model}：连不上（${e instanceof Error ? e.message : String(e)}）`);
       throw new AIError("连不上 AI 服务，检查一下网络和服务地址", "network");

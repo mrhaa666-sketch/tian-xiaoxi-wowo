@@ -350,12 +350,7 @@ export class UI {
     };
     p.querySelector<HTMLElement>("#lg-export")!.onclick = async () => {
       const name = `恬小溪窝窝-日志-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.txt`;
-      if (this.shareFile && await this.shareFile(name, text())) return;
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([text()], { type: "text/plain" }));
-      a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      await this.saveFile(name, text(), "text/plain");
     };
     p.querySelector<HTMLElement>("#lg-clear")!.onclick = () => this.confirm("清空所有日志？", () => { clearLog(); show(); });
   }
@@ -543,9 +538,12 @@ export class UI {
     return el;
   }
 
-  /** 存一个文本文件：安卓版走系统分享，网页版直接下载 */
+  /** 存一个文本文件：打开系统分享，可以存到手机里或者发给别人（电脑上开发预览时改成直接下载） */
   async saveFile(name: string, text: string, type = "application/json") {
-    if (this.shareFile && await this.shareFile(name, text)) return;
+    if (this.shareFile) {
+      if (!await this.shareFile(name, text)) this.flash("没能打开分享，看看日志里的原因");
+      return;
+    }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([text], { type }));
     a.download = name;
@@ -782,15 +780,7 @@ export class UI {
 
   private async downloadPack(chars: CharacterData[], label: string) {
     this.flash("正在打包角色（带立绘的会大一些）…");
-    const blob = new Blob([JSON.stringify(await exportPack(this.game, chars), null, 1)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `角色包-${label}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    this.flash("角色包已导出");
+    await this.saveFile(`角色包-${label}.json`, JSON.stringify(await exportPack(this.game, chars), null, 1));
   }
 
   select(id: string | null) {
@@ -1214,7 +1204,8 @@ export class UI {
         ? "天冷时角色会去开取暖器、钻被炉，天热时开空调。空调挂在墙上。"
         : this.furnCat === "墙饰" || this.furnCat === "节日"
         ? "墙饰点靠墙那一格就会挂到后墙上。室内墙默认是矮墙沿，挂上去看不到，可以挂在房子最外面的高墙上，或者在设置里把墙改成高墙。"
-        : "点地板放下家具。";
+        : "点地板放下家具。放好以后长按可以拖动、转向、镜像。";
+      opts += `<div class="pack-row"><button class="btn small" id="b-rot">${b.rot ? "现在：竖着放" : "现在：横着放"}（点一下换）</button></div>`;
     } else if (b.tool === "turn") {
       hint = "点一件家具，让它转过身背对镜头（再点一次转回来）。";
     } else if (b.tool === "mirror") {
@@ -1249,6 +1240,8 @@ export class UI {
     body.querySelector<HTMLElement>("#hp-import")!.onclick = () => this.homeFile().click();
     body.querySelector<HTMLElement>("#hp-owners")!.onclick = () => this.openRoomOwners();
     body.querySelector<HTMLElement>("#hp-pets")!.onclick = () => this.openPets();
+    const rotBtn = body.querySelector<HTMLElement>("#b-rot");
+    if (rotBtn) rotBtn.onclick = () => { b.rot = b.rot ? 0 : 1; this.renderBuild(); };
     body.querySelector<HTMLElement>("#hp-export")!.onclick = (e) => this.homeExportMenu(e as MouseEvent);
     body.querySelector<HTMLElement>("#hp-manage")!.onclick = () => this.openHomeManager();
     const rn = body.querySelector<HTMLInputElement>("#room-name");

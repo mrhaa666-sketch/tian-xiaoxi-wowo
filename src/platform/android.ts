@@ -1,5 +1,5 @@
 // 安卓版专用：后台常驻、角色消息变成手机通知、在通知里直接回复、被系统杀掉后的兜底。
-// 在网页版里什么都不做。
+// （电脑上开发预览时这些都不启用。）
 import { App } from "@capacitor/app";
 import { BackgroundRunner } from "@capacitor/background-runner";
 import { Capacitor, registerPlugin } from "@capacitor/core";
