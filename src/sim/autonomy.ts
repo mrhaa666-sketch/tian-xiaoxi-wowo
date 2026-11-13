@@ -115,6 +115,16 @@ export function scoreOptions(game: Game, c: Character): Option[] {
       if (skillTag) s *= 1 + d.skills[skillTag] * 0.05;
       if (d.lore.favoriteFurniture.includes(f.def)) { s *= 1.4; why = why || "最喜欢的家具"; }
       if (d.lore.favoriteRoom && roomName === d.lore.favoriteRoom) s *= 1.15;
+      // 房间归属：自己的房间待着舒服，睡觉一定回自己房间；别人的房间不随便进，更不会睡别人的床
+      const owners = w.data.owners?.[roomName];
+      if (owners?.length) {
+        const rest = it.id === "sleep" || it.id === "nap" || tags.includes("rest");
+        if (owners.includes(c.id)) s *= rest ? 1.8 : 1.25;
+        else {
+          const close = owners.some((id) => (d.relations[id]?.affinity ?? 0) >= 60);
+          s *= rest ? (close ? 0.2 : 0.05) : close ? 0.6 : 0.3;
+        }
+      }
       // 家具标签：喜欢的标签越多越想用，讨厌的就不太想
       const ftags = def.tags ?? [];
       const liked = ftags.filter((t) => d.lore.likedTags.includes(t));

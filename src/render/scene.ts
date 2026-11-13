@@ -234,7 +234,8 @@ export class Scene {
       if (!room) continue;
       const cx = tiles.reduce((a, t) => a + t[0], 0) / tiles.length + 0.5;
       const cy = tiles.reduce((a, t) => a + t[1], 0) / tiles.length + 0.5;
-      const label = new Text({ resolution: TEXT_RES, text: room, style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 20, fill: 0xffffff, fontWeight: "700", stroke: { color: 0x5a4a44, width: 4 } } });
+      const owners = this.game.ownersOf(room).map((c) => c.name);
+      const label = new Text({ resolution: TEXT_RES, text: owners.length ? `${room}\n${owners.join("·")}的房间` : room, style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 20, fill: 0xffffff, fontWeight: "700", stroke: { color: 0x5a4a44, width: 4 }, align: "center", lineHeight: 24 } });
       label.anchor.set(0.5);
       const p = toScreen(cx, cy);
       label.position.set(p.x, p.y);

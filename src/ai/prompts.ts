@@ -187,7 +187,12 @@ export function buildContext(game: Game, c: Character, events: GameEvent[], reca
   const td = d.today;
   lines.push(`【今天】吃了 ${td.meals} 顿，睡了 ${(td.sleepMin / 60).toFixed(1)} 小时，工作 ${(td.workMin / 60).toFixed(1)} 小时，玩了 ${(td.funMin / 60).toFixed(1)} 小时，${td.showered ? "洗过澡了" : "还没洗澡"}`);
   if (d.illness) lines.push(`【生病】${d.illness.name}，严重程度 ${Math.round(d.illness.severity)}/100。躺床休息、吃药、喝粥会好得快，带病工作会加重。`);
-  lines.push(`【位置】${c.room}。正在：${d.activity}`);
+  const roomOwner = (r: string) => { const o = game.ownersOf(r); return o.length ? (o.includes(c) ? (o.length > 1 ? `你和${o.filter((x) => x !== c).map((x) => x.name).join("、")}的房间` : "你的房间") : `${o.map((x) => x.name).join("、")}的房间`) : ""; };
+  const here = roomOwner(c.room);
+  lines.push(`【位置】${c.room}${here ? `（${here}）` : ""}。正在：${d.activity}`);
+  const mine = game.roomsOf(c);
+  const owned = game.world.rooms().filter((r) => game.ownersOf(r).length && !mine.includes(r));
+  lines.push(`【房间归属】${mine.length ? `你的房间：${mine.join("、")}。睡觉、换衣服、想一个人待着时回自己房间。` : "你还没有自己的房间。"}${owned.length ? `别人的房间：${owned.map((r) => `${r}是${game.ownersOf(r).map((x) => x.name).join("、")}的`).join("；")}。没事不要进别人的房间，更不要睡别人的床；要进去可以先打招呼。` : ""}其他房间是大家共用的。`);
   const sn = c.sense;
   if (sn) {
     lines.push(`【你对这个房间的感觉】美观 ${sn.beauty}，明亮 ${sn.light}，热闹 ${sn.lively}，凌乱 ${sn.clutter}（综合舒服程度 ${sn.score}/100）。${sn.people.length ? `这里还有：${sn.people.join("、")}。` : "这里只有你一个人。"}${sn.notable.length ? `你注意到：${sn.notable.join("；")}。` : ""}`);
@@ -231,7 +236,7 @@ export function buildContext(game: Game, c: Character, events: GameEvent[], reca
     frows.push(`- ${f.uid} | ${f.name} | ${f.room} | ${acts}${tg ? ` | ${tg}` : ""}${on}${occ ? ` | ${occ === c ? "你" : occ.name}正在用` : ""}${foods.length ? ` | 上面有：${foods.join("、")}` : ""}`);
   }
   lines.push(frows.join("\n"));
-  lines.push(`【房间】${game.world.rooms().join("、")}`);
+  lines.push(`【房间】${game.world.rooms().map((r) => { const o = roomOwner(r); return o ? `${r}（${o}）` : r; }).join("、")}`);
 
   // 记忆：最重要的几条 + 最近的几条 + 和眼前的事有关的（从知识库里找出来的）
   const own = d.memories.filter((m) => m.kind !== "knowledge");

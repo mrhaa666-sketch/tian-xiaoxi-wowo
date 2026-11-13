@@ -39,6 +39,8 @@ export interface WorldData {
   walls: Record<string, Wall>; // key = "x,y,N" 或 "x,y,W"
   furniture: FurnitureInst[];
   foods: FoodItem[];
+  /** 房间归属：房间名 → 住在这里的角色 id（没写的房间是公共区域） */
+  owners?: Record<string, string[]>;
 }
 
 export type Emotion =

@@ -158,10 +158,44 @@ export class Game {
     this.chars = this.chars.filter((c) => c.id !== id);
     this.inbox.delete(id);
     for (const c of this.chars) delete c.d.relations[id];
+    for (const [room, ids] of Object.entries(this.world.data.owners ?? {})) {
+      const left = ids.filter((x) => x !== id);
+      if (left.length) this.world.data.owners![room] = left; else delete this.world.data.owners![room];
+    }
     this.changed();
   }
 
   byId(id: string) { return this.chars.find((c) => c.id === id); }
+
+  // ———————————————————— 房间归属 ————————————————————
+
+  /** 这个房间是谁的（空 = 公共区域） */
+  ownersOf(room: string): Character[] {
+    return (this.world.data.owners?.[room] ?? []).map((id) => this.byId(id)).filter((c): c is Character => !!c);
+  }
+  /** 这个角色有哪些自己的房间 */
+  roomsOf(c: Character): string[] {
+    return Object.entries(this.world.data.owners ?? {}).filter(([room, ids]) => ids.includes(c.id) && this.world.rooms().includes(room)).map(([room]) => room);
+  }
+  /** 设置房间归属，并告诉相关的人 */
+  setOwners(room: string, ids: string[]) {
+    const o = (this.world.data.owners ??= {});
+    const before = new Set(o[room] ?? []);
+    if (ids.length) o[room] = [...new Set(ids)]; else delete o[room];
+    this.world.version++; // 房间名牌上的名字要重画
+    const names = (list: string[]) => list.map((id) => this.byId(id)?.name).filter(Boolean).join("、");
+    for (const id of ids) if (!before.has(id)) {
+      const c = this.byId(id);
+      const mates = ids.filter((x) => x !== id);
+      if (c) this.emit(c, `主人把${room}分给了你${mates.length ? `（和${names(mates)}一起住）` : ""}，这是你的房间了。`, 2);
+    }
+    for (const id of before) if (!ids.includes(id)) {
+      const c = this.byId(id);
+      if (c) this.emit(c, `主人把${room}收回去了${ids.length ? `，现在是${names(ids)}的房间` : "，变成了公共区域"}。`, 2);
+    }
+    this.log("player", ids.length ? `把${room}分给了${names(ids)}` : `把${room}设为公共区域`);
+    this.changed();
+  }
 
   labelOf(target: string) {
     const f = this.world.getFurniture(target);
@@ -315,12 +349,15 @@ export class Game {
   }
 
   sendToBed(c: Character) {
-    const beds = this.world.data.furniture.filter((f) => f.def === "bed" && !this.occupantOf(f.uid));
+    const beds = this.world.data.furniture.filter((f) => (f.def === "bed" || f.def === "bed_double") && !this.occupantOf(f.uid));
     if (!beds.length) {
       this.log("system", "家里没有空着的床");
       return;
     }
-    beds.sort((a, b) => Math.hypot(a.x - c.d.pos.x, a.y - c.d.pos.y) - Math.hypot(b.x - c.d.pos.x, b.y - c.d.pos.y));
+    // 先回自己房间的床；别人房间的床排在最后
+    const mine = new Set(this.roomsOf(c));
+    const rank = (f: { x: number; y: number }) => { const r = this.world.roomOf(f.x, f.y); return mine.has(r) ? 0 : this.ownersOf(r).length ? 2 : 1; };
+    beds.sort((a, b) => rank(a) - rank(b) || Math.hypot(a.x - c.d.pos.x, a.y - c.d.pos.y) - Math.hypot(b.x - c.d.pos.x, b.y - c.d.pos.y));
     const it = c.d.illness ? "rest" : "nap";
     const minutes = c.d.illness ? 120 : 30;
     c.setPlan([{ do: "use", target: beds[0].uid, interaction: it, minutes }]);

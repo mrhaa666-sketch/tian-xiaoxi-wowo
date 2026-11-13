@@ -559,6 +559,34 @@ export class UI {
     ], e.clientX - pr.left, e.clientY - pr.top + 40);
   }
 
+  /** 房间归属：每个房间是谁的（可以几个人合住），没分配的是公共区域。focus = 从某个角色那里打开 */
+  openRoomOwners(focus?: Character) {
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>房间归属</h2></header>
+      <div class="page-body" id="ro-body"></div>`);
+    const body = p.querySelector<HTMLElement>("#ro-body")!;
+    const render = () => {
+      const g = this.game, w = g.world;
+      const levels = w.levels();
+      body.innerHTML = `
+        <div class="help">点名字把房间分给 TA（可以几个人合住），再点一次取消。没分给任何人的房间是大家共用的。角色睡觉、想一个人待着时会回自己的房间，一般不进别人的房间，也不会睡别人的床（关系很好的除外）。${focus ? `<br>现在在给 <b>${esc(focus.name)}</b> 分房间。` : ""}</div>
+        ${levels.map((l) => `${levels.length > 1 ? `<h3 class="group">${levelName(l)}</h3>` : ""}${w.rooms(l).map((room) => {
+          const ids = w.data.owners?.[room] ?? [];
+          return `<div class="own-room"><div class="own-name"><b>${esc(room)}</b><small>${ids.length ? "" : "公共区域"}</small></div>
+            <div class="taste">${g.chars.map((c) => `<button type="button" class="taste-chip ${ids.includes(c.id) ? "like" : ""} ${focus === c ? "focus" : ""}" data-room="${esc(room)}" data-who="${c.id}">${esc(c.name)}</button>`).join("")}</div></div>`;
+        }).join("")}`).join("")}`;
+      body.querySelectorAll<HTMLElement>("[data-who]").forEach((b) => (b.onclick = () => {
+        const room = b.dataset.room!, who = b.dataset.who!;
+        const ids = this.game.world.data.owners?.[room] ?? [];
+        this.game.setOwners(room, ids.includes(who) ? ids.filter((x) => x !== who) : [...ids, who]);
+        this.game.save();
+        render();
+        if (this.sheet === "detail") this.renderDetail();
+      }));
+    };
+    render();
+  }
+
   /** 管理导入的家具和房间：改标签、让 AI 填标签、删除 */
   openHomeManager() {
     const p = this.page(`
@@ -713,6 +741,7 @@ export class UI {
       $("#act-del").onclick = () => this.confirm(`确定要让${c.name}搬走吗？TA的记忆和聊天记录会一起删除。`, () => { this.game.removeCharacter(c.id); this.select(null); this.renderRoster(); });
     } else if (this.tab === "profile") {
       tb.innerHTML = this.profileHtml(c);
+      tb.querySelector<HTMLElement>("[data-own-rooms]")!.onclick = () => this.openRoomOwners(c);
     } else if (this.tab === "relations") {
       const rows = Object.entries(c.d.relations).map(([id, r]) => {
         const who = id === "player" ? "主人（你）" : this.game.byId(id)?.name ?? "（已搬走）";
@@ -837,6 +866,7 @@ export class UI {
         <div><span>爱好</span><b>${esc(p.hobbies || "—")}</b></div>
         <div><span>喜欢吃</span><b>${food(p.likes)}</b></div>
         <div><span>不爱吃</span><b>${food(p.dislikes)}</b></div>
+        <div><span>TA 的房间</span><b>${esc(this.game.roomsOf(c).join("、") || "还没有")} <button class="btn small" data-own-rooms>分配</button></b></div>
       </div>
       <h4 class="sec">性格</h4><div class="traits">${traits}</div>
       <h4 class="sec">技能</h4><div class="skills">${skills}</div>
@@ -1080,7 +1110,7 @@ export class UI {
     }
     body.innerHTML = `<div class="sheet-head"><h2>建造</h2><button class="btn small primary" id="build-done">完成</button></div>
       <button class="plan-entry" id="open-plan"><span class="pe-ic">▦</span><span><b>户型设计（DIY 公寓）</b><small>在平面图上拼房间，一键生成整套房子</small></span></button>
-      <div class="pack-row"><button class="btn small" id="hp-import">导入家具包 / 房间包</button><button class="btn small" id="hp-export">导出…</button><button class="btn small" id="hp-manage">管理自制</button></div>
+      <div class="pack-row"><button class="btn small" id="hp-owners">房间归属</button><button class="btn small" id="hp-import">导入家具包 / 房间包</button><button class="btn small" id="hp-export">导出…</button><button class="btn small" id="hp-manage">管理自制</button></div>
       <div class="chips-row tools">${tools.map(([k, n]) => `<button class="chip-btn ${b.tool === k ? "on" : ""}" data-tool="${k}">${n}</button>`).join("")}</div>
       ${opts}<p class="hint">${hint} 两指拖动画面、捏合缩放。</p>`;
     const on = (sel: string, fn: (el: HTMLElement) => void) => body.querySelectorAll<HTMLElement>(sel).forEach((x) => (x.onclick = () => { fn(x); this.renderBuild(); }));
@@ -1093,6 +1123,7 @@ export class UI {
     body.querySelector<HTMLElement>("#build-done")!.onclick = () => this.closeSheet();
     body.querySelector<HTMLElement>("#open-plan")!.onclick = () => this.openPlanner();
     body.querySelector<HTMLElement>("#hp-import")!.onclick = () => this.homeFile().click();
+    body.querySelector<HTMLElement>("#hp-owners")!.onclick = () => this.openRoomOwners();
     body.querySelector<HTMLElement>("#hp-export")!.onclick = (e) => this.homeExportMenu(e as MouseEvent);
     body.querySelector<HTMLElement>("#hp-manage")!.onclick = () => this.openHomeManager();
     const rn = body.querySelector<HTMLInputElement>("#room-name");

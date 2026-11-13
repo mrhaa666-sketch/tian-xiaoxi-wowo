@@ -442,3 +442,9 @@ html, body { overscroll-behavior: none; }
 }
 .chip.weather { cursor: pointer; }
 .pill-btn.lv { font-weight: 800; font-size: 12px; color: var(--accent-ink); }
+
+.own-room { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.own-name { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.own-name small { color: var(--muted); font-size: 12px; }
+.taste-chip.focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.own-room .taste-chip.like::before { content: "🏠 "; }
