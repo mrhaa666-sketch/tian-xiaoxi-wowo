@@ -643,9 +643,13 @@ export class Scene {
       g.circle(x, y, 22).fill({ color: warm ? 0xffc48a : 0xfffbe6, alpha: 0.95 * Math.max(0.3, dl.sun) });
     } else {
       const p = ((h - 18.8 + 24) % 24) / 10.7, x = W * (0.12 + 0.76 * p), y = H * (0.45 - Math.sin(p * Math.PI) * 0.22);
-      g.circle(x, y, 36).fill({ color: 0xdfe6ff, alpha: 0.12 });
+      g.circle(x, y, 36).fill({ color: 0xdfe6ff, alpha: 0.08 });
       g.circle(x, y, 17).fill({ color: 0xf3f1e2, alpha: 0.95 });
-      g.circle(x + 7, y - 5, 15).fill(dl.skyTop); // 月牙
+      // 月牙：用月亮所在高度的天空颜色挡掉一块
+      const k = Math.max(0, Math.min(1, (y - 5) / H));
+      const lerp = (a: number, b: number, sh: number) => Math.round(((a >> sh) & 255) + (((b >> sh) & 255) - ((a >> sh) & 255)) * k);
+      const skyAt = (lerp(dl.skyTop, dl.skyBottom, 16) << 16) | (lerp(dl.skyTop, dl.skyBottom, 8) << 8) | lerp(dl.skyTop, dl.skyBottom, 0);
+      g.circle(x + 7, y - 5, 15).fill(skyAt);
     }
     // 白天的云慢慢飘
     if (dl.night < 0.5) for (const c of this.clouds) {
