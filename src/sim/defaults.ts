@@ -39,7 +39,7 @@ const defaultSkills = (): Skills => ({ cooking: 1, music: 0, art: 0, gaming: 1, 
 export const defaultLore = (): Lore => ({
   selfName: "我", callPlayer: "主人", speechStyle: "", catchphrases: [], backstory: "", goals: "", fears: "",
   likesTopics: "", dislikesTopics: "", habits: "", chronotype: "normal", sickBehavior: "normal", conflictStyle: "",
-  favoriteRoom: "", favoriteFurniture: [], likedTags: [], dislikedTags: [], heat: "normal", presetRelations: [], custom: [],
+  favoriteRoom: "", favoriteFurniture: [], likedTags: [], dislikedTags: [], heat: "normal", group: "", groupRoutine: "", presetRelations: [], custom: [],
 });
 const defaultProfile = (): Profile => ({ age: 20, birthday: "", job: "", hobbies: "", likes: [], dislikes: [] });
 

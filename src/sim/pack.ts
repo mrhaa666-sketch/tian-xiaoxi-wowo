@@ -102,6 +102,7 @@ export function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
       favoriteFurniture: strList(l.favoriteFurniture)?.filter((id) => FURNITURE_BY_ID[id]),
       likedTags: strList(l.likedTags)?.filter((t) => TAG_SET.has(t)), dislikedTags: strList(l.dislikedTags)?.filter((t) => TAG_SET.has(t)),
       heat: ["cold", "normal", "hot"].includes(l.heat as string) ? (l.heat as Lore["heat"]) : undefined,
+      group: str(l.group, 30), groupRoutine: str(l.groupRoutine, 500),
       presetRelations: Array.isArray(l.presetRelations) ? (l.presetRelations as Record<string, unknown>[]).map((r) => ({ name: str(r?.name, 20) ?? "", affinity: num(r?.affinity, -100, 100) ?? 0, note: str(r?.note, 60) ?? "" })).filter((r) => r.name).slice(0, 20) : undefined,
       custom: Array.isArray(l.custom) ? (l.custom as Record<string, unknown>[]).map((c) => ({ key: str(c?.key, 20) ?? "", value: str(c?.value, 300) ?? "" })).filter((c) => c.key).slice(0, 30) : undefined,
     }),
@@ -145,6 +146,8 @@ export async function importPack(game: Game, raw: unknown): Promise<{ added: str
       if (!d.profile.dislikes?.length && ep.dislikes?.length) d.profile.dislikes = ep.dislikes;
       if (!d.profile.likes?.length && ep.likes?.length) d.profile.likes = ep.likes;
       if (!d.profile.hobbies && ep.hobbies) d.profile.hobbies = ep.hobbies;
+      if (!d.lore.group && el.group) d.lore.group = el.group;
+      if (!d.lore.groupRoutine && el.groupRoutine) d.lore.groupRoutine = el.groupRoutine;
       updated.push(e.name);
       continue;
     }

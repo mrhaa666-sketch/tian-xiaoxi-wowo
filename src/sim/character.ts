@@ -6,6 +6,7 @@ import { emptyDay } from "./defaults";
 import { senseRoom, type RoomSense } from "./perception";
 import { FOOD_BY_ID, FURNITURE_BY_ID, type InteractionDef } from "../world/catalog";
 import type { Game } from "./game";
+import { maybeInvite, togetherOf } from "./together";
 
 const SPEED = 1.3; // 格/秒（平常速度）
 const PACE_SPEED = { slow: 0.7, normal: 1, fast: 1.45 } as const;
@@ -151,6 +152,14 @@ export class Character {
       this.gainSkill(acting.id, tags, m);
     }
     if (this.moving) d.skills.fitness = Math.min(10, d.skills.fitness + 0.0015 * m);
+
+    // —— 和别人一起做事：不寂寞，更开心 ——
+    const tg = togetherOf(this.game, this);
+    if (tg && acting) {
+      n.social = clamp(n.social + 0.5 * tg.others.length * m);
+      n.mood = clamp(n.mood + 0.08 * m);
+      d.today.socialMin += m;
+    }
 
     // —— 冷热：太冷太热都不舒服，冻久了容易感冒 ——
     const felt = this.game.feltOf(this);
@@ -476,6 +485,7 @@ export class Character {
         if (it.id === "toggle") f.state = { ...f.state, on: !f.state?.on };
         if (step.do === "eat" || it.tags?.includes("eat")) this.consumeFood(f);
         if (it.news) this.game.deliverNews(this, FURNITURE_BY_ID[f.def].name);
+        maybeInvite(this.game, this, f, it, minutes);
         if (it.tags?.includes("rest") && this.d.illness) this.showEmote("💤", 4);
         else if (it.pose === "lie") this.showEmote("💤", 4);
         break;

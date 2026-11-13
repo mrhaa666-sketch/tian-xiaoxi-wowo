@@ -1308,6 +1308,8 @@ export class UI {
       b.classList.toggle("dislike", !!l.dislikedTags?.includes(b.dataset.ftag!));
     });
     set("#l-heat", l.heat);
+    set("#l-group", l.group);
+    set("#l-groupr", l.groupRoutine);
     p.querySelector<HTMLDetailsElement>("details.more")!.open = true;
   }
 
@@ -1382,6 +1384,11 @@ export class UI {
           <div class="field"><label for="l-room">最喜欢待的房间</label><select id="l-room"><option value="">没有特别喜欢的</option>${[...new Set([...this.game.world.rooms(), l.favoriteRoom].filter(Boolean))].map((r) => `<option ${l.favoriteRoom === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div>
           <div class="field"><label>最喜欢的家具</label><div class="help">选中的家具 TA 会更常去用。</div>
             <div class="taste">${FURNITURE.filter((f) => f.interactions.some((i) => i.id !== "toggle")).map((f) => `<button type="button" class="taste-chip fav ${l.favoriteFurniture.includes(f.id) ? "like" : ""}" data-fav="${f.id}">${esc(f.name)}</button>`).join("")}</div></div>
+          <div class="grid2">
+            <div class="field"><label for="l-group">所属团体</label><input id="l-group" value="${esc(l.group ?? "")}" placeholder="例如：Leo/need" /></div>
+            <div class="field"><label for="l-groupr">团体日常</label><textarea id="l-groupr" style="min-height:44px" placeholder="16:00 乐队排练">${esc(l.groupRoutine ?? "")}</textarea></div>
+          </div>
+          <div class="help" style="margin-top:-6px;margin-bottom:10px">同一个团体的人会更常叫对方一起做事；到了团体日常写的时间，大家会聚到一起（每行一条「时间 内容」，团体里写一个人的就够）。</div>
           <div class="field"><label for="l-heat">怕冷还是怕热</label><select id="l-heat">${[["normal", "普通"], ["cold", "怕冷"], ["hot", "怕热"]].map(([k, n]) => `<option value="${k}" ${l.heat === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
           <div class="field"><label>喜欢的家具风格</label><div class="help">点一下是喜欢（❤），再点是讨厌（✕），再点取消。用到、待在有这些标签的家具旁边时心情会变好（或变差），也更常去用。</div>
             ${TAG_GROUPS.map((g) => `<div class="tag-group"><small>${g.name}</small><div class="taste">${g.tags.map((t) => `<button type="button" class="taste-chip ${l.likedTags.includes(t) ? "like" : l.dislikedTags.includes(t) ? "dislike" : ""}" data-ftag="${t}">${t}</button>`).join("")}</div></div>`).join("")}</div>
@@ -1491,6 +1498,8 @@ export class UI {
       l.likedTags = [...p.querySelectorAll<HTMLElement>("[data-ftag].like")].map((x) => x.dataset.ftag!);
       l.dislikedTags = [...p.querySelectorAll<HTMLElement>("[data-ftag].dislike")].map((x) => x.dataset.ftag!);
       l.heat = v("#l-heat") as Lore["heat"];
+      l.group = v("#l-group").slice(0, 30);
+      l.groupRoutine = $<HTMLTextAreaElement>("#l-groupr").value.trim().slice(0, 500);
       l.presetRelations = v("#l-rel").split("\n").map((line) => line.split(/[|｜]/).map((x) => x.trim())).filter((q) => q[0])
         .map(([name, aff, note]) => ({ name, affinity: Math.max(-100, Math.min(100, Number(aff) || 0)), note: note ?? "" }));
       l.custom = v("#l-custom").split("\n").map((line) => line.split(/[:：]/)).filter((q) => q[0]?.trim())

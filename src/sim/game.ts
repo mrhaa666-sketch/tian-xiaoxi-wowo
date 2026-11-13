@@ -7,6 +7,7 @@ import { World, uid } from "../world/world";
 import { Character, clamp } from "./character";
 import { defaultSettings, normalizeCharacter, sampleCharacters } from "./defaults";
 import type { WeatherNow } from "../core/types";
+import { checkGroupRoutines, type Together } from "./together";
 import { FEELING_CN, feeling, feltTemp, fetchForecast, roomTemps, seasonTemp, weatherFromSettings, weatherLine } from "./climate";
 
 const SAVE_KEY = "wowo-save-v1";
@@ -56,6 +57,8 @@ export class Game {
   private weatherBusy = false;
   private coldTold = new Map<string, number>();
   onWeather?: () => void;
+  /** 正在一起做事的人：角色 id → 那次活动 */
+  together = new Map<string, Together>();
 
   constructor(save: SaveData) {
     this.world = new World(save.world);
@@ -526,6 +529,7 @@ export class Game {
       this.checkClock();
       this.checkPhone();
       this.checkCold();
+      checkGroupRoutines(this, this.firedCues);
     }
     if (Date.now() - this.weatherAt > 30 * 60_000) void this.refreshWeather();
   }

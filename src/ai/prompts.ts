@@ -7,6 +7,7 @@ import type { Character } from "../sim/character";
 import type { Game, GameEvent } from "../sim/game";
 import type { Memory } from "../core/types";
 import { FEELING_CN, feeling, weatherLine } from "../sim/climate";
+import { togetherOf } from "../sim/together";
 
 const STEP_SCHEMA = {
   type: "object",
@@ -190,6 +191,12 @@ export function buildContext(game: Game, c: Character, events: GameEvent[], reca
   const roomOwner = (r: string) => { const o = game.ownersOf(r); return o.length ? (o.includes(c) ? (o.length > 1 ? `你和${o.filter((x) => x !== c).map((x) => x.name).join("、")}的房间` : "你的房间") : `${o.map((x) => x.name).join("、")}的房间`) : ""; };
   const here = roomOwner(c.room);
   lines.push(`【位置】${c.room}${here ? `（${here}）` : ""}。正在：${d.activity}`);
+  const tg = togetherOf(game, c);
+  if (tg) lines.push(`【正在一起】你正和${tg.others.map((o) => o.name).join("、")}一起：${tg.t.label}。可以边做边聊几句（用 talk 或 say）。`);
+  if (d.lore.group) {
+    const mates = game.chars.filter((o) => o !== c && o.d.lore.group === d.lore.group).map((o) => o.name);
+    lines.push(`【团体】你是「${d.lore.group}」的一员${mates.length ? `，家里的同伴：${mates.join("、")}` : "（家里还没有同伴）"}。${d.lore.groupRoutine ? `团体日常：${d.lore.groupRoutine.replace(/\n/g, "；")}` : ""}`);
+  }
   const mine = game.roomsOf(c);
   const owned = game.world.rooms().filter((r) => game.ownersOf(r).length && !mine.includes(r));
   lines.push(`【房间归属】${mine.length ? `你的房间：${mine.join("、")}。睡觉、换衣服、想一个人待着时回自己房间。` : "你还没有自己的房间。"}${owned.length ? `别人的房间：${owned.map((r) => `${r}是${game.ownersOf(r).map((x) => x.name).join("、")}的`).join("；")}。没事不要进别人的房间，更不要睡别人的床；要进去可以先打招呼。` : ""}其他房间是大家共用的。`);

@@ -133,6 +133,8 @@ export interface Lore {
   likedTags: string[];    // 喜欢的家具标签（见 world/tags.ts），比如「可爱」「音乐」
   dislikedTags: string[]; // 讨厌的家具标签
   heat: "cold" | "normal" | "hot"; // 怕冷 / 普通 / 怕热
+  group: string;          // 所属团体（比如乐队名），同一个团体的人会一起做团体的事
+  groupRoutine: string;   // 团体日常，每行「HH:MM 内容」，到点大家会聚到一起
   presetRelations: { name: string; affinity: number; note: string }[]; // 和其他角色（按名字）的初始关系
   custom: { key: string; value: string }[]; // 其他自定义设定
 }
@@ -194,6 +196,8 @@ export interface PlanStep {
   minutes?: number;
   line?: string;
   emotion?: Emotion;
+  /** 被谁叫来一起做的（角色 id，团体活动是 "group"） */
+  with?: string;
 }
 
 export type Pose = "stand" | "walk" | "sit" | "lie" | "use" | "eat";
