@@ -74,7 +74,7 @@ export class Scene {
   private builtLightHour = -1;
   daylight: Daylight = daylightAt(12);
   private skins = new Map<string, CharSkin>();
-  private bubbles = new Map<string, { box: Container; bg: Graphics; text: Text; emote: Text; name: Text }>();
+  private bubbles = new Map<string, { box: Container; bg: Graphics; text: Text; emote: Text; name: Text; sig?: string }>();
   private builtVersion = -1;
   private builtWallMode = "";
   private staticObjs: Container[] = [];
@@ -639,6 +639,15 @@ export class Scene {
         this.skins.set(c.id, skin);
         this.objects.addChild(skin.view);
       }
+      // 不在画面里的人（别的楼层、屏幕外面）：不画、不更新动画，人多时省很多
+      const sp = this.gridToScreen(c.d.pos.x, c.d.pos.y);
+      const m = 160 * this.zoom, sw = this.app.screen.width, sh = this.app.screen.height;
+      if (sp.x < -m || sp.x > sw + m || sp.y < -m || sp.y > sh + m * 2) {
+        skin.view.visible = false;
+        const bb = this.bubbles.get(c.id);
+        if (bb) bb.box.visible = false;
+        continue;
+      }
       skin.update(c, t);
       const p = toScreen(c.d.pos.x, c.d.pos.y);
       skin.view.position.set(p.x, p.y);
@@ -825,6 +834,15 @@ export class Scene {
     const head = this.gridToScreen(c.d.pos.x, c.d.pos.y);
     const topY = head.y - (c.pose === "lie" ? 50 : 112) * this.zoom;
     b.box.position.set(head.x, topY);
+    // 没有气泡、表情、名字、选中圈时整个隐藏；内容没变时不重画（重画图形很费时间）
+    const mode0 = this.game.settings.look?.names ?? "selected";
+    const sel0 = this.selected === c.id;
+    const showName = mode0 === "all" || (mode0 === "selected" && sel0);
+    b.box.visible = !c.hidden && (!!c.speech || !!c.emote || showName || sel0);
+    if (!b.box.visible) return;
+    const sig = [c.speech?.text ?? "", c.emote?.icon ?? "", showName ? 1 : 0, sel0 ? 1 : 0, c.pose === "lie" ? 1 : 0, Math.round(this.zoom * 200), c.speech ? Math.round(head.x / 4) : 0].join("|");
+    if (b.sig === sig) return;
+    b.sig = sig;
     // 名字、气泡都跟着画面一起缩放（以默认大小 0.7 为准），缩小看全景时不会挡住房子
     const ns = Math.max(0.45, Math.min(1.25, this.zoom / 0.7));
     b.box.scale.set(ns);

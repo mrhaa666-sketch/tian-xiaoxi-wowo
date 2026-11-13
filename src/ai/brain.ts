@@ -60,7 +60,9 @@ export class Brain {
   /** 每帧调用：挑出需要做决定的角色 */
   tick() {
     const now = Date.now();
-    for (const c of this.game.chars) {
+    // 人多、AI 次数有限时轮流来：最久没让 AI 想过的人先来，不会总是排在前面的几个人用掉额度
+    const order = this.game.chars.length > 6 ? this.game.chars.slice().sort((a, b) => (this.lastDecision.get(a.id) ?? 0) - (this.lastDecision.get(b.id) ?? 0)) : this.game.chars;
+    for (const c of order) {
       if (this.inFlight.has(c.id)) continue;
       const box = this.game.inbox.get(c.id) ?? [];
       const urgent = box.some((e) => e.priority >= 2);
