@@ -22,7 +22,7 @@ const STUBBORN = /逞强|硬撑|工作狂|责任|认真|不服输/;
 export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decision {
   const n = c.d.needs;
   const plan: PlanStep[] = [];
-  let emotion: Emotion = n.mood > 70 ? "happy" : n.mood < 35 ? "sad" : "normal";
+  let emotion: Emotion = n.mood > 85 ? "happy" : n.mood < 35 ? "sad" : "normal";
 
   // 先回应别人跟自己说的话
   const talk = [...events].reverse().find((e) => e.from && e.priority >= 3);

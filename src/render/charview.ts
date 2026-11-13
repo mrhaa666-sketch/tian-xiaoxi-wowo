@@ -171,6 +171,10 @@ export class SpriteSkin implements CharSkin {
   private loading = new Set<string>();
   private nextBlink = 0;
   private current = "";
+  // 表情是「一时的反应」还是「持续的状态」：开心、惊讶、害羞、生气过一会儿就回到平常的脸
+  private lastEmo = "";
+  private emoSince = 0;
+  private lastThought = "";
   private marks = new Graphics();
   private markText = new Text({ text: "", resolution: 3, style: { fontFamily: "ZCOOL KuaiLe, Noto Sans SC, sans-serif", fontWeight: "900", fontSize: 20, fill: 0xffffff } });
 
@@ -213,9 +217,13 @@ export class SpriteSkin implements CharSkin {
   update(c: Character, t: number) {
     const m = this.m;
     if (!m || !this.textures.size) { this.fallback.update(c, t); return; }
-    const emo = c.d.illness ? "sick" : c.d.emotion;
-    const speaking = !!c.speech;
     const now = performance.now();
+    const raw = c.d.illness ? "sick" : c.d.emotion;
+    // 心情变了，或者有了新的想法（新的决定），表情重新出现一次
+    if (raw !== this.lastEmo || c.d.thought !== this.lastThought) { this.lastEmo = raw; this.lastThought = c.d.thought; this.emoSince = now; }
+    const hold = raw === "angry" ? 15000 : 8000;
+    const emo = ["happy", "surprised", "shy", "angry"].includes(raw) && now - this.emoSince > hold ? "normal" : raw;
+    const speaking = !!c.speech;
     if (now > this.nextBlink + 140) this.nextBlink = now + 2500 + Math.random() * 3500;
     const blinking = now > this.nextBlink;
     let key: string;
