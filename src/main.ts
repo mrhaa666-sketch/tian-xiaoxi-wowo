@@ -4,6 +4,7 @@ import { getNews } from "./ai/news";
 import { Game } from "./sim/game";
 import { Scene, type Ghost } from "./render/scene";
 import { UI } from "./ui/app";
+import { FURNITURE_BY_ID } from "./world/catalog";
 import { initSpriteStore } from "./render/spriteStore";
 import { ROOM_PRESETS, autoWalls, stampPreset } from "./world/presets";
 
@@ -91,6 +92,28 @@ async function boot() {
   let dragStart: { x: number; y: number; moved: boolean; button: number } | null = null;
   let paintStart: { x: number; y: number } | null = null;
   let pinchDist = 0;
+  // 长按家具：删除
+  let pressTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+  const longPress = (sx: number, sy: number) => {
+    pressTimer = null;
+    const f = scene.pickFurniture(sx, sy) ?? game.world.furnitureAt(Math.floor(scene.screenToGrid(sx, sy).x), Math.floor(scene.screenToGrid(sx, sy).y)) ?? null;
+    if (!f) return;
+    if (dragStart) dragStart.moved = true; // 松手时不再当成点击
+    paintStart = null;
+    navigator.vibrate?.(20);
+    const name = FURNITURE_BY_ID[f.def]?.name ?? "家具";
+    scene.ghost = { kind: "furniture", x: f.x, y: f.y, def: f.def, rot: f.rot, ok: false };
+    ui.confirm(`要把这件${name}删掉吗？`, () => {
+      const occ = game.occupantOf(f.uid);
+      if (occ) occ.setPlan([], true); // 正在用的人先停下
+      game.world.removeFurniture(f.uid);
+      game.log("player", `删掉了${name}`);
+      game.changed();
+      ui.flash(`删掉了${name}`);
+    });
+    setTimeout(() => { if (scene.ghost?.kind === "furniture") scene.ghost = null; }, 1500);
+  };
 
   const local = (e: PointerEvent | WheelEvent) => {
     const r = canvas.getBoundingClientRect();
@@ -192,11 +215,14 @@ async function boot() {
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      cancelPress();
       dragStart = null;
       paintStart = null;
       return;
     }
     dragStart = { ...p, moved: false, button: e.button };
+    cancelPress();
+    if (e.button === 0) pressTimer = setTimeout(() => longPress(p.x, p.y), 550);
     if (ui.build.on && e.button === 0 && ui.build.tool === "floor") {
       const { tx, ty } = hoverInfo(p.x, p.y);
       paintStart = { x: tx, y: ty };
@@ -218,6 +244,7 @@ async function boot() {
     if (dragStart && prev) {
       const far = Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > 6;
       const panning = !ui.build.on || dragStart.button !== 0 || (ui.build.tool !== "floor");
+      if (far) cancelPress();
       if (far && panning) {
         dragStart.moved = true;
         scene.panBy(p.x - prev.x, p.y - prev.y);
@@ -226,6 +253,7 @@ async function boot() {
     updateGhost(p.x, p.y);
   });
   const end = (e: PointerEvent) => {
+    cancelPress();
     const p = local(e);
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchDist = 0;
@@ -254,7 +282,7 @@ async function boot() {
     ui.select(c ? c.id : null);
   };
   canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); dragStart = null; paintStart = null; });
+  canvas.addEventListener("pointercancel", (e) => { cancelPress(); pointers.delete(e.pointerId); dragStart = null; paintStart = null; });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const p = local(e);

@@ -166,6 +166,20 @@ export class Scene {
     return best?.c ?? null;
   }
 
+  /** 屏幕上这个点落在哪件家具的立牌上（按图片本身判断，前面的优先） */
+  pickFurniture(sx: number, sy: number): FurnitureInst | null {
+    let best: { f: FurnitureInst; z: number } | null = null;
+    for (const f of this.game.world.data.furniture) {
+      const v = this.furnitureViews.get(f.uid);
+      if (!v || !v.box.visible) continue;
+      const target = v.sprite.visible ? v.sprite : v.g;
+      const b = target.getBounds();
+      if (sx < b.minX || sx > b.maxX || sy < b.minY || sy > b.maxY) continue;
+      if (!best || v.box.zIndex > best.z) best = { f, z: v.box.zIndex };
+    }
+    return best?.f ?? null;
+  }
+
   // ———————————————————— 静态部分：地板、墙、家具 ————————————————————
 
   private rebuildStatic() {
