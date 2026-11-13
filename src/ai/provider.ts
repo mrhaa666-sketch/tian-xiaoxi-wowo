@@ -165,6 +165,17 @@ export class OpenAICompatLLM implements LLM {
     try {
       return parseJSONLoose(content);
     } catch (e) {
+      const props = (req.schema as { properties?: Record<string, unknown> }).properties ?? {};
+      // 聊天时模型有时直接回一句话、没包成 JSON：把这句话当成回复，不算失败
+      if ("reply" in props && content.trim()) {
+        dlog("warn", "AI", `回复没按 JSON 格式，直接当成聊天回复：${content.slice(0, 80)}`);
+        return { reply: content.trim().replace(/^["“]|["”]$/g, "") };
+      }
+      // 做决定时：把它的回复贴回去，提醒它只输出 JSON，再试一次
+      if (!retried && content.trim()) {
+        dlog("warn", "AI", `回复不是有效的 JSON，提醒它按格式重来一次：${content.slice(0, 80)}`);
+        return this.complete({ ...req, messages: [...req.messages, { role: "assistant", content }, { role: "user", content: "格式不对。请只输出一个 JSON 对象，字段按【输出格式】里的要求，不要加任何其他文字。" }] }, true);
+      }
       dlog("error", "AI", `回复不是有效的 JSON：${content.slice(0, 300) || "（空回复）"}`);
       throw e;
     }

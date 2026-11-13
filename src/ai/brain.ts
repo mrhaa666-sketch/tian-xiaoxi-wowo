@@ -168,7 +168,7 @@ export class Brain {
     dlog("error", "AI", `调用失败（${err.kind}）：${err.message}`);
     if (err.kind === "auth") {
       this.pauseUntil = Date.now() + 10 * 60_000;
-      this.setStatus("error", "API Key 无效，已暂停 AI（去设置里检查）");
+      this.setStatus("error", `${err.message}（AI 先暂停 10 分钟）`);
     } else if (err.kind === "rate") {
       this.pauseUntil = Date.now() + 60_000;
       this.setStatus("error", "被限流了，1 分钟后再试");
@@ -368,6 +368,8 @@ export class Brain {
           if (last.role === role) last.content += "\n" + m.text;
           else msgs.push({ role, content: m.text });
         }
+        // 以前的回复也按 JSON 的样子给模型看：历史里全是大白话的话，模型很容易跟着只回一句话、不回 JSON
+        for (const m of msgs.slice(2)) if (m.role === "assistant") m.content = JSON.stringify({ reply: m.content });
         if (msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: text });
         const raw = (await this.llm.complete({ tier: "chat", system: CHAT_SYSTEM, messages: msgs, schema: CHAT_SCHEMA })) as Record<string, unknown>;
         const plan = (Array.isArray(raw.plan) ? raw.plan : []).map((s) => this.sanitizeStep(s as Record<string, unknown>)).filter(Boolean) as PlanStep[];
