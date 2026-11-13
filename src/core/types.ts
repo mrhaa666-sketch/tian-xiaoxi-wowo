@@ -250,6 +250,13 @@ export interface AISettings {
   embedBaseUrl: string;
   embedKey: string;   // 留空就用上面的 API Key
   embedModel: string;
+  /** 每天最多调用几次（0 = 不限）；到了就改用本地规则，第二天恢复 */
+  dailyMaxCalls: number;
+  /** 估算花费用的单价：每百万 token 多少元（输入 / 输出），不填就只显示 token 数 */
+  priceIn: number;
+  priceOut: number;
+  /** 每天最多花多少元（按上面的单价估算，0 = 不限） */
+  dailyMaxCost: number;
 }
 
 /** 天气：自动 = 按手机位置查天气预报；手动 = 自己选 */

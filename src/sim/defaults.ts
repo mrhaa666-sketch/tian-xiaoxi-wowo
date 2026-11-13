@@ -149,6 +149,10 @@ export function defaultSettings(): Settings {
       embedBaseUrl: "",
       embedKey: "",
       embedModel: "BAAI/bge-m3",
+      dailyMaxCalls: 0,
+      priceIn: 0,
+      priceOut: 0,
+      dailyMaxCost: 0,
     },
     news: {
       enabled: true,

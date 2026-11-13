@@ -12,6 +12,7 @@ import { FOODS, FURNITURE } from "../world/catalog";
 import { AIError, makeLLM, type LLM } from "./provider";
 import { dlog } from "../core/log";
 import { MemoryBank } from "./memory";
+import { overLimit } from "./usage";
 import { FURNITURE_TAGS } from "../world/tags";
 import { setFurnitureTags } from "../world/homepack";
 import type { FurnitureDef } from "../world/catalog";
@@ -50,8 +51,20 @@ export class Brain {
     this.onStatus?.();
   }
 
+  /** 今天到了上限的原因（没到就是 null） */
+  limitReason(): string | null {
+    const a = this.game.settings.ai;
+    return overLimit(a.dailyMaxCalls, a.dailyMaxCost, a.priceIn, a.priceOut);
+  }
+
   private canCall() {
     const now = Date.now();
+    const lim = this.limitReason();
+    if (lim) {
+      const msg = `${lim}，今天剩下的时间用本地规则`;
+      if (this.status.message !== msg) this.setStatus("error", msg);
+      return false;
+    }
     this.callTimes = this.callTimes.filter((t) => now - t < 60_000);
     this.status.callsLastMinute = this.callTimes.length;
     return !!this.llm && now > this.pauseUntil && this.callTimes.length < this.game.settings.ai.maxCallsPerMinute && this.inFlight.size < 2;
@@ -303,7 +316,8 @@ export class Brain {
     c.d.chat.push({ t: Date.now(), from: "player", text });
     g.log("player", `对${c.name}说：${text}`);
     let res: { reply: string; emotion: Emotion; plan: PlanStep[]; memory?: string; affinity_delta?: number };
-    if (this.llm && Date.now() > this.pauseUntil) {
+    const limited = this.limitReason();
+    if (this.llm && Date.now() > this.pauseUntil && !limited) {
       try {
         this.callTimes.push(Date.now());
         const history = c.d.chat.slice(-16);
@@ -334,6 +348,7 @@ export class Brain {
       }
     } else {
       res = mockChat(c, text);
+      if (limited && this.llm) res = { ...res, reply: `（今天的 AI 额度用完了）${res.reply}` };
     }
     c.d.chat.push({ t: Date.now(), from: "char", text: res.reply });
     if (c.d.chat.length > 200) c.d.chat.splice(0, c.d.chat.length - 200);

@@ -5,6 +5,7 @@ import type { AISettings, Memory } from "../core/types";
 import type { Character } from "../sim/character";
 import { postJSON } from "../core/net";
 import { dlog } from "../core/log";
+import { recordEmbed } from "./usage";
 
 const DB = "wowo-memvec";
 const STORE = "vec";
@@ -84,6 +85,7 @@ export class MemoryBank {
       const data = (r.json as { data?: { embedding: number[]; index?: number }[] } | null)?.data;
       if (r.status !== 200 || !Array.isArray(data)) throw new Error(`向量模型返回 ${r.status}：${r.text.slice(0, 120)}`);
       const sorted = data.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      recordEmbed((r.json as { usage?: { total_tokens?: number } })?.usage?.total_tokens ?? 0);
       this.status = `向量模型正常（${sorted[0]?.embedding.length ?? 0} 维）`;
       return sorted.map((d) => Float32Array.from(d.embedding));
     } catch (e) {

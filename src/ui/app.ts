@@ -24,6 +24,7 @@ import { saveSprites, spriteUrl } from "../render/spriteStore";
 import type { PermissionApi } from "../platform/android";
 import { currentHour, daylightAt } from "../render/daylight";
 import { clearLog, formatLog } from "../core/log";
+import { estimateCost, usageDays, usageToday, type DayUsage } from "../ai/usage";
 import { applyBackup, autoBackup, listDaily, loadDaily, makeBackup, parseBackup } from "../core/backup";
 
 const PALETTES: [string, string, string][] = [
@@ -1542,6 +1543,15 @@ export class UI {
           <div class="field"><label for="s-rate">每分钟最多调用</label><input id="s-rate" type="number" inputmode="numeric" min="1" max="60" value="${ai.maxCallsPerMinute}" /></div>
           <div class="field"><label for="s-interval">闲下来多久问 AI（秒）</label><input id="s-interval" type="number" inputmode="numeric" min="10" max="3600" value="${ai.decisionInterval}" /></div>
         </div>
+        <h3 class="group">用量和上限</h3>
+        <div id="s-usage"></div>
+        <div class="grid2">
+          <div class="field"><label for="s-maxcalls">每天最多调用几次（0 = 不限）</label><input id="s-maxcalls" type="number" inputmode="numeric" min="0" value="${ai.dailyMaxCalls}" /></div>
+          <div class="field"><label for="s-maxcost">每天最多花多少元（0 = 不限）</label><input id="s-maxcost" type="number" inputmode="decimal" min="0" step="0.1" value="${ai.dailyMaxCost}" /></div>
+          <div class="field"><label for="s-pin">输入单价（元 / 百万 token）</label><input id="s-pin" type="number" inputmode="decimal" min="0" step="0.1" value="${ai.priceIn}" /></div>
+          <div class="field"><label for="s-pout">输出单价（元 / 百万 token）</label><input id="s-pout" type="number" inputmode="decimal" min="0" step="0.1" value="${ai.priceOut}" /></div>
+        </div>
+        <div class="help" style="margin-bottom:8px">单价去你用的 AI 服务的价格页看，填上以后才能估算花费。到了上限，当天剩下的时间角色改用本地规则生活，第二天自动恢复。</div>
         <h3 class="group">长期记忆（向量模型）</h3>
         <div class="help" style="margin-bottom:8px">每个角色有自己的知识库。填上向量模型后，聊天时会按意思找出相关的记忆，比按文字找更准。要用兼容 OpenAI 的 /embeddings 接口，比如硅基流动（https://api.siliconflow.cn/v1，模型 BAAI/bge-m3）或 OpenAI（text-embedding-3-small）。DeepSeek 没有向量模型。地址留空就按文字相似度找。</div>
         <div class="field"><label for="s-ebase">向量模型地址</label><input id="s-ebase" value="${esc(ai.embedBaseUrl)}" inputmode="url" placeholder="https://api.siliconflow.cn/v1" /></div>
@@ -1664,6 +1674,13 @@ export class UI {
       if (!g) { $("#s-wplace").textContent = "没找到这个城市"; return; }
       setPlace(g.lat, g.lon, g.place);
     };
+    {
+      const days = usageDays(7);
+      const cost = (u: DayUsage) => (ai.priceIn || ai.priceOut ? ` · 约 ${estimateCost(u, ai.priceIn, ai.priceOut).toFixed(2)} 元` : "");
+      const t = usageToday();
+      $("#s-usage").innerHTML = `<div class="usage-today"><b>今天</b> 调用 ${t.calls} 次（聊天 ${t.chat}、做决定 ${t.decide}）· ${((t.inTok + t.outTok) / 1000).toFixed(1)}k token${cost(t)}${t.embed ? ` · 向量 ${t.embed} 次` : ""}</div>
+        ${days.length > 1 ? `<div class="usage-days">${days.slice(1).map(([d, u]) => `<div><span>${d.slice(5)}</span><span>${u.calls} 次 · ${((u.inTok + u.outTok) / 1000).toFixed(1)}k${cost(u)}</span></div>`).join("")}</div>` : ""}`;
+    }
     $("#s-bk-out").onclick = async () => {
       this.flash("正在打包存档…");
       this.game.save();
@@ -1718,6 +1735,8 @@ export class UI {
       ai.chatModel = $<HTMLInputElement>("#s-chat").value.trim();
       ai.maxCallsPerMinute = Math.max(1, Number($<HTMLInputElement>("#s-rate").value) || 6);
       ai.decisionInterval = Math.max(10, Number($<HTMLInputElement>("#s-interval").value) || 90);
+      const num = (id: string) => Math.max(0, Number($<HTMLInputElement>(id).value) || 0);
+      ai.dailyMaxCalls = Math.round(num("#s-maxcalls")); ai.dailyMaxCost = num("#s-maxcost"); ai.priceIn = num("#s-pin"); ai.priceOut = num("#s-pout");
       ai.embedBaseUrl = $<HTMLInputElement>("#s-ebase").value.trim();
       ai.embedModel = $<HTMLInputElement>("#s-emodel").value.trim() || "BAAI/bge-m3";
       ai.embedKey = $<HTMLInputElement>("#s-ekey").value.trim();

@@ -472,3 +472,7 @@ html, body { overscroll-behavior: none; }
 .help { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .page-head h2 { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pack-row .btn { font-size: 13px; padding-left: 8px; padding-right: 8px; }
+
+.usage-today { padding: 10px 12px; border-radius: 12px; background: var(--card); font-size: 13px; margin-bottom: 6px; }
+.usage-days { display: grid; gap: 2px; font-size: 12px; color: var(--muted); margin-bottom: 8px; padding: 0 4px; }
+.usage-days > div { display: flex; justify-content: space-between; }

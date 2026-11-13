@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AISettings } from "../core/types";
 import { postJSON } from "../core/net";
 import { dlog } from "../core/log";
+import { recordCall } from "./usage";
 
 /** 把 AI 服务返回的错误码翻译成看得懂的话 */
 function explainStatus(status: number, text: string, provider: string): { msg: string; kind: AIError["kind"] } {
@@ -72,6 +73,7 @@ export class AnthropicLLM implements LLM {
         },
         ...(fallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       });
+      recordCall(req.tier === "chat" ? "chat" : "decide", (res.usage?.input_tokens ?? 0) + (res.usage?.cache_read_input_tokens ?? 0) + (res.usage?.cache_creation_input_tokens ?? 0), res.usage?.output_tokens ?? 0);
       if (res.stop_reason === "refusal") throw new AIError("AI 拒绝了这次请求", "refusal");
       const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
       return parseJSONLoose(text);
@@ -145,6 +147,8 @@ export class OpenAICompatLLM implements LLM {
       return this.complete(req);
     }
     if (r.status >= 400) { const ex = explainStatus(r.status, r.text, this.s.provider); throw new AIError(ex.msg, ex.kind); }
+    const usage = (r.json as { usage?: { prompt_tokens?: number; completion_tokens?: number } })?.usage;
+    recordCall(req.tier === "chat" ? "chat" : "decide", usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
     const content = (r.json as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message?.content ?? "";
     try {
       return parseJSONLoose(content);
