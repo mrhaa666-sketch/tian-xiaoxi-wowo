@@ -593,7 +593,8 @@ export class Game {
     const h = now.getHours() + now.getMinutes() / 60;
     const quiet = ph.quietStart !== ph.quietEnd && (ph.quietStart < ph.quietEnd ? h >= ph.quietStart && h < ph.quietEnd : h >= ph.quietStart || h < ph.quietEnd);
     if (quiet) return;
-    const gap = { low: 4, normal: 2, high: 1 }[ph.proactive] * 3600_000; // 同一个人两条消息至少隔多久
+    const gap = { low: 4, normal: 2, high: 1, max: 0.33 }[ph.proactive] * 3600_000; // 同一个人两条消息至少隔多久
+    const eager = ph.proactive === "max";
     for (const c of this.chars) {
       if (c.hidden) continue; // 在睡觉、泡澡
       const since = Date.now() - this.lastMessageAt(c);
@@ -601,9 +602,9 @@ export class Game {
       const reason = this.messageReason(c, h);
       if (!reason) continue;
       // 理由越充分越可能发；平均下来不会每次检查都发
-      if (Math.random() > reason.weight * 0.12) continue;
+      if (Math.random() > (eager ? Math.max(0.5, reason.weight) * 0.5 : reason.weight * 0.12)) continue;
       this.phoneNudged.set(c.id, Date.now());
-      this.emit(c, `主人现在不在（没有在看这个家），已经 ${Math.round(Math.min(since, 12 * 3600_000) / 60000)} 分钟没收到你的消息了。${reason.text}如果你想，可以用 tell_player 像发手机消息一样给主人发一两句话；不想发就不用发。`, 2);
+      this.emit(c, `主人现在不在（没有在看这个家），已经 ${Math.round(Math.min(since, 12 * 3600_000) / 60000)} 分钟没收到你的消息了。${reason.text}${eager ? "主人说想多收到你的消息：用 tell_player 像发手机消息一样给主人发一两句话吧（说说你在做什么、在想什么都可以）。" : "如果你想，可以用 tell_player 像发手机消息一样给主人发一两句话；不想发就不用发。"}`, eager ? 3 : 2);
     }
   }
 

@@ -78,14 +78,14 @@ addEventListener("check", async (resolve) => {
     const h = d.getHours() + d.getMinutes() / 60;
     const quiet = ph.quietStart !== ph.quietEnd && (ph.quietStart < ph.quietEnd ? h >= ph.quietStart && h < ph.quietEnd : h >= ph.quietStart || h < ph.quietEnd);
     if (quiet) { resolve(); return; }
-    const gap = ({ low: 4, normal: 2, high: 1 }[ph.proactive] || 2) * 3600000;
+    const gap = ({ low: 4, normal: 2, high: 1, max: 0.33 }[ph.proactive] || 2) * 3600000;
     const inbox = readJSON("inbox", []);
     let sent = 0;
     for (const c of state.chars) {
-      if (sent >= 1) break; // 一次最多替一个人发，避免一下子来好几条
+      if (sent >= (ph.proactive === "max" ? 2 : 1)) break; // 一次最多替一两个人发，避免一下子来好几条
       if (asleep(c, h)) continue;
       if (Date.now() - (c.lastTold || 0) < gap * (1.3 - (c.extraversion || 50) / 200)) continue;
-      if (Math.random() > 0.35) continue;
+      if (Math.random() > (ph.proactive === "max" ? 0.8 : 0.35)) continue;
       const useAI = state.ai && state.ai.provider !== "mock" && state.ai.apiKey;
       const text = (useAI ? await aiLine(state.ai, c, h) : null) || templateLine(c, h);
       CapacitorNotifications.schedule([{ id: Math.floor(Math.random() * 1e9), title: c.name, body: text }]);

@@ -98,6 +98,8 @@ export class UI {
   onSettingsSaved?: () => void;
   /** 安卓版：请求不被省电策略限制，返回是否已允许 */
   requestBatteryExemption?: () => Promise<boolean>;
+  /** 安卓版：发一条测试通知（返回是否发出去了） */
+  testNotify?: () => Promise<boolean>;
   /** 安卓版：后台权限的检查和申请 */
   permissions?: PermissionApi;
   /** 后台权限引导页打开时，回到应用后刷新状态 */
@@ -1572,9 +1574,10 @@ export class UI {
         <label class="switch"><input type="checkbox" id="s-tint" ${s.look.timeTint ? "checked" : ""} /><span>界面颜色跟着时间变化（清晨偏粉、傍晚偏橙、夜里偏蓝）</span></label>
         <h3 class="group">手机</h3>
         <div class="help" style="margin-bottom:8px">安卓版才有用。你没在看的时候，角色会按时间和自己的状态给你发消息，消息会变成手机通知，点通知能直接聊天，也能在通知里回复。</div>
-        <label class="switch"><input type="checkbox" id="s-keep" ${s.phone.keepAlive ? "checked" : ""} /><span>后台常驻（通知栏会有一条常驻消息，角色在你不看的时候也照常生活）</span></label>
+        <label class="switch"><input type="checkbox" id="s-keep" ${s.phone.keepAlive ? "checked" : ""} /><span>后台常驻（通知栏一直显示「正在运行」和大家在做什么，角色在你不看的时候也照常生活）</span></label>
+        ${this.testNotify ? `<div class="pack-row"><button type="button" class="btn small" id="s-testn">发一条测试通知</button></div>` : ""}
         <div class="field"><label for="s-pro">角色主动发消息</label>
-          <select id="s-pro">${[["off", "不发"], ["low", "少一点（同一个人至少隔 4 小时）"], ["normal", "正常（至少隔 2 小时）"], ["high", "多一点（至少隔 1 小时）"]].map(([v, n]) => `<option value="${v}" ${s.phone.proactive === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+          <select id="s-pro">${[["off", "不发"], ["low", "少一点（同一个人至少隔 4 小时）"], ["normal", "正常（至少隔 2 小时）"], ["high", "多一点（至少隔 1 小时）"], ["max", "很多（至少隔 20 分钟，几乎每次都发）"]].map(([v, n]) => `<option value="${v}" ${s.phone.proactive === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <div class="grid2">
           <div class="field"><label for="s-qs">免打扰从几点</label><input id="s-qs" type="number" inputmode="numeric" min="0" max="23" value="${s.phone.quietStart}" /></div>
           <div class="field"><label for="s-qe">到几点</label><input id="s-qe" type="number" inputmode="numeric" min="0" max="23" value="${s.phone.quietEnd}" /></div>
@@ -1655,6 +1658,11 @@ export class UI {
       const g = await geocode(name);
       if (!g) { $("#s-wplace").textContent = "没找到这个城市"; return; }
       setPlace(g.lat, g.lon, g.place);
+    };
+    const tn = p.querySelector<HTMLElement>("#s-testn");
+    if (tn) tn.onclick = async () => {
+      const ok = await this.testNotify!();
+      this.flash(ok ? "发了一条测试通知，看看手机顶上" : "通知权限还没开，先允许通知");
     };
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
     $("#s-save").onclick = () => {

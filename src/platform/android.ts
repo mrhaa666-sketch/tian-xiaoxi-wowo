@@ -14,7 +14,7 @@ import type { UI } from "../ui/app";
 
 /** 自己写的原生插件：开 / 关前台服务（通知栏的常驻消息），请求不被省电策略限制 */
 interface KeepAlivePlugin {
-  start(opts: { title: string; text: string }): Promise<void>;
+  start(opts: { title: string; text: string; big?: string }): Promise<void>;
   stop(): Promise<void>;
   requestIgnoreBatteryOptimizations(): Promise<{ granted: boolean }>;
   status(): Promise<PermStatus>;
@@ -46,7 +46,8 @@ function waitForReturn(): Promise<void> {
 const KeepAlive = registerPlugin<KeepAlivePlugin>("KeepAlive");
 
 const RUNNER = "com.tianxiaoxi.wowo.check";
-const CHANNEL = "chars";
+// 频道等级建好后改不了：旧的「chars」换成新的，加上弹出横幅、声音、震动、锁屏显示
+const CHANNEL = "chars_v2";
 
 export const isAndroid = () => Capacitor.getPlatform() === "android";
 
@@ -62,6 +63,9 @@ async function notify(c: Character, text: string) {
       channelId: CHANNEL,
       actionTypeId: "reply",
       group: `wowo-${c.id}`,
+      largeBody: text,
+      summaryText: "窝窝里的消息",
+      autoCancel: true,
       extra: { charId: c.id },
     }],
   }).catch(() => {});
@@ -86,7 +90,9 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
 
   // —— 通知 ——
   await LocalNotifications.requestPermissions().catch(() => {});
-  await LocalNotifications.createChannel({ id: CHANNEL, name: "角色的消息", description: "家里的人发给你的消息", importance: 4, visibility: 1, vibration: true }).catch(() => {});
+  await LocalNotifications.deleteChannel({ id: "chars" }).catch(() => {});
+  // 最高等级：在屏幕上方弹出横幅、响铃、震动，锁屏上也显示全文
+  await LocalNotifications.createChannel({ id: CHANNEL, name: "角色的消息", description: "家里的人发给你的消息（会弹出横幅、响铃、震动）", importance: 5, visibility: 1, vibration: true, lights: true, lightColor: "#E87CA0" }).catch(() => {});
   await LocalNotifications.registerActionTypes({
     types: [{ id: "reply", actions: [{ id: "reply", title: "回复", input: true, inputButtonTitle: "发送", inputPlaceholder: "说点什么…" }] }],
   }).catch(() => {});
@@ -107,15 +113,33 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
     }
   });
 
-  // —— 前台服务：让系统别把应用杀掉 ——
-  const syncKeepAlive = async () => {
+  // —— 前台服务：通知栏里一直显示「正在运行」和大家在做什么，也让系统别把应用杀掉 ——
+  let lastStatus = "";
+  const syncKeepAlive = async (force = true) => {
     if (game.settings.phone.keepAlive) {
-      await KeepAlive.start({ title: "恬小溪窝窝", text: `窝窝里有 ${game.chars.length} 个人在过日子` }).catch(() => {});
+      const lines = game.chars.map((c) => `${c.name}${c.hidden ? "💤" : ""}：${c.room} · ${c.d.activity}`);
+      const awake = game.chars.filter((c) => !c.hidden).length;
+      const text = game.chars.length ? (lines[0] + (lines.length > 1 ? ` 等 ${lines.length} 人` : "")) : "家里还没有人";
+      const status = lines.join("\n");
+      if (!force && status === lastStatus) return;
+      lastStatus = status;
+      await KeepAlive.start({ title: `恬小溪窝窝正在运行 · ${awake}/${game.chars.length} 人醒着`, text, big: status || text }).catch(() => {});
     } else {
+      lastStatus = "";
       await KeepAlive.stop().catch(() => {});
     }
   };
   await syncKeepAlive();
+  // 每分钟刷新一下常驻通知里大家在做什么
+  setInterval(() => { void syncKeepAlive(false); }, 60_000);
+  ui.testNotify = async () => {
+    const c = game.chars[0];
+    if (!c) return false;
+    const perm = await LocalNotifications.checkPermissions().catch(() => ({ display: "denied" }));
+    if (perm.display !== "granted") { await ui.permissions?.requestNotifications(); return false; }
+    await notify(c, `（测试）${c.d.lore.callPlayer || "主人"}，能看到这条吗？`);
+    return true;
+  };
   ui.onSettingsSaved = () => { void syncKeepAlive(); };
   ui.requestBatteryExemption = () => KeepAlive.requestIgnoreBatteryOptimizations().then((r) => r.granted).catch(() => false);
   ui.permissions = {

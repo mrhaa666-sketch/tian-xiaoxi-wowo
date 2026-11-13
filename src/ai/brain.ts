@@ -93,7 +93,8 @@ export class Brain {
       }
       // 没有 AI 可用、或额度暂时用完时，闲下来就用本地规则安排
       if (free && (!this.llm || !this.canCall())) {
-        if (rested && now - last > 4_000) this.decideLocally(c);
+        // 有要回应的事（别人说话、主人不在时想发消息）就马上处理，不用等歇够
+        if ((rested || urgent) && now - last > (urgent ? 3_500 : 4_000)) this.decideLocally(c);
       } else if (!this.llm && urgent && now - last > 3_500) {
         this.decideLocally(c);
       }

@@ -17,7 +17,8 @@ import androidx.core.app.NotificationCompat;
  * 这样网页里的游戏在后台也能继续推进时间、让角色给主人发消息。
  */
 public class KeepAliveService extends Service {
-    static final String CHANNEL = "keepalive";
+    // 换了频道 id：旧的「keepalive」是最低等级，很多手机会把它折叠起来看不到；频道等级建好后改不了，只能换新的
+    static final String CHANNEL = "keepalive_v2";
     static final int ID = 7001;
     private PowerManager.WakeLock wakeLock;
 
@@ -25,11 +26,15 @@ public class KeepAliveService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String title = intent != null && intent.hasExtra("title") ? intent.getStringExtra("title") : "恬小溪窝窝";
         String text = intent != null && intent.hasExtra("text") ? intent.getStringExtra("text") : "大家在家里过日子";
+        String big = intent != null && intent.hasExtra("big") ? intent.getStringExtra("big") : null;
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel ch = new NotificationChannel(CHANNEL, "后台常驻", NotificationManager.IMPORTANCE_MIN);
-            ch.setDescription("让家里的人在你不看的时候也照常生活");
+            nm.deleteNotificationChannel("keepalive");
+            // 低等级：通知栏里一直看得到，但不响、不弹出
+            NotificationChannel ch = new NotificationChannel(CHANNEL, "正在运行", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("通知栏里一直显示窝窝正在运行、大家在做什么，让系统不要把应用关掉");
             ch.setShowBadge(false);
+            ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             nm.createNotificationChannel(ch);
         }
         Intent open = new Intent(this, MainActivity.class);
@@ -41,7 +46,12 @@ public class KeepAliveService extends Service {
                 .setContentText(text)
                 .setContentIntent(pi)
                 .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setSubText("正在运行")
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setStyle(big != null ? new NotificationCompat.BigTextStyle().bigText(big) : null)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 .build();
         if (Build.VERSION.SDK_INT >= 34) {

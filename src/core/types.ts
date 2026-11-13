@@ -302,7 +302,7 @@ export interface LookSettings {
 /** 手机（安卓版）：后台常驻和主动发消息 */
 export interface PhoneSettings {
   keepAlive: boolean;                       // 后台常驻（通知栏有一条常驻消息）
-  proactive: "off" | "low" | "normal" | "high"; // 角色主动发消息的频率
+  proactive: "off" | "low" | "normal" | "high" | "max"; // 角色主动发消息的频率
   quietStart: number;                       // 免打扰开始（几点），和结束相同表示不设免打扰
   quietEnd: number;
 }
