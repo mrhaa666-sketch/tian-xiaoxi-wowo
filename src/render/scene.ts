@@ -81,7 +81,7 @@ export class Scene {
   private builtLightHour = -1;
   daylight: Daylight = daylightAt(12);
   private skins = new Map<string, CharSkin>();
-  private bubbles = new Map<string, { box: Container; bg: Graphics; text: Text; emote: Text; name: Text; sig?: string }>();
+  private bubbles = new Map<string, { box: Container; bg: Graphics; sp: Container; sbg: Graphics; text: Text; emote: Text; name: Text; sig?: string }>();
   private builtVersion = -1;
   private builtWallMode = "";
   private staticObjs: Container[] = [];
@@ -674,6 +674,7 @@ export class Scene {
       skin.view.zIndex = z;
       this.updateBubble(c);
     }
+    this.layoutBubbles();
     this.drawPets(t);
     this.applyFocus();
     this.drawGhost();
@@ -799,6 +800,36 @@ export class Scene {
     return best?.p ?? null;
   }
 
+  /** 同时说话的人站得近时，气泡会叠在一起：从下往上排，挡住了就把上面那个往上挪 */
+  private layoutBubbles() {
+    const list: { sp: Container; k: number; x0: number; x1: number; y0: number; y1: number }[] = [];
+    for (const [id, b] of this.bubbles) {
+      if (!b.box.visible || !b.text.visible) continue;
+      const c = this.game.byId(id);
+      if (!c?.speech) continue;
+      const r = b.sbg.getBounds();
+      list.push({ sp: b.sp, k: b.box.scale.y, x0: r.x, x1: r.x + r.width, y0: r.y, y1: r.y + r.height });
+    }
+    if (list.length < 2) return;
+    // 越靠下（离镜头越近）的越先放，挪的是后面的
+    list.sort((a, b) => b.y1 - a.y1);
+    const gap = 4;
+    for (let i = 1; i < list.length; i++) {
+      const cur = list[i];
+      for (let pass = 0; pass < 6; pass++) {
+        let moved = false;
+        for (let j = 0; j < i; j++) {
+          const o = list[j];
+          if (cur.x1 <= o.x0 || cur.x0 >= o.x1 || cur.y1 + gap <= o.y0 || cur.y0 >= o.y1 + gap) continue;
+          const dy = cur.y1 + gap - o.y0;
+          cur.sp.y -= dy / cur.k; cur.y0 -= dy; cur.y1 -= dy;
+          moved = true;
+        }
+        if (!moved) break;
+      }
+    }
+  }
+
   /** 季节的小东西：春天飘樱花瓣，秋天飘落叶（晴天、多云时） */
   private drawSeason(g: Graphics, t: number, W: number, H: number) {
     const m = new Date().getMonth() + 1;
@@ -917,70 +948,67 @@ export class Scene {
     let b = this.bubbles.get(c.id);
     if (!b) {
       const box = new Container();
-      const bg = new Graphics();
+      const bg = new Graphics();   // 名字牌、选中圈
+      const sp = new Container();  // 说话的气泡和表情（叠在一起时整个往上挪）
+      const sbg = new Graphics();
       const text = new Text({ resolution: TEXT_RES, text: "", style: { fontFamily: "Noto Sans SC, PingFang SC, Microsoft YaHei, sans-serif", fontSize: 14, fill: 0x2e2a33, wordWrap: true, wordWrapWidth: 170, breakWords: true, lineHeight: 19 } });
       const emote = new Text({ resolution: TEXT_RES, text: "", style: { fontSize: 22, fontFamily: "sans-serif" } });
       const name = new Text({ resolution: TEXT_RES, text: "", style: { fontFamily: "Noto Sans SC, sans-serif", fontSize: 12, fill: 0xffffff, fontWeight: "700" } });
       emote.anchor.set(0.5, 1);
       name.anchor.set(0.5, 0);
-      box.addChild(bg, text, emote, name);
+      sp.addChild(sbg, text, emote);
+      box.addChild(bg, name, sp);
       this.overlay.addChild(box);
-      b = { box, bg, text, emote, name };
+      b = { box, bg, sp, sbg, text, emote, name };
       this.bubbles.set(c.id, b);
     }
     const head = this.gridToScreen(c.d.pos.x, c.d.pos.y);
     const topY = head.y - (c.pose === "lie" ? 50 : 112) * this.zoom;
     b.box.position.set(head.x, topY);
+    b.sp.y = 0; // 避让的偏移每帧重新算
     // 没有气泡、表情、名字、选中圈时整个隐藏；内容没变时不重画（重画图形很费时间）
-    const mode0 = this.game.settings.look?.names ?? "selected";
-    const sel0 = this.selected === c.id;
-    const showName = mode0 === "all" || (mode0 === "selected" && sel0);
-    b.box.visible = !c.hidden && (!!c.speech || !!c.emote || showName || sel0);
+    const mode = this.game.settings.look?.names ?? "selected";
+    const sel = this.selected === c.id;
+    const showName = mode === "all" || (mode === "selected" && sel);
+    b.box.visible = !c.hidden && (!!c.speech || !!c.emote || showName || sel);
     if (!b.box.visible) return;
-    const sig = [c.speech?.text ?? "", c.emote?.icon ?? "", showName ? 1 : 0, sel0 ? 1 : 0, c.pose === "lie" ? 1 : 0, Math.round(this.zoom * 200), c.speech ? Math.round(head.x / 4) : 0].join("|");
+    const sig = [c.speech?.text ?? "", c.emote?.icon ?? "", showName ? 1 : 0, sel ? 1 : 0, c.pose === "lie" ? 1 : 0, Math.round(this.zoom * 200), c.speech ? Math.round(head.x / 4) : 0].join("|");
     if (b.sig === sig) return;
     b.sig = sig;
-    // 名字、气泡都跟着画面一起缩放（以默认大小 0.7 为准），缩小看全景时不会挡住房子
-    const ns = Math.max(0.45, Math.min(1.25, this.zoom / 0.7));
+    // 名字、气泡都和房子按同样的比例缩放（以默认大小 0.7 为准），缩小看全景时不会比人还大、挤成一团
+    const ns = Math.max(0.2, Math.min(1.25, this.zoom / 0.7));
     b.box.scale.set(ns);
     const L = (v: number) => v / ns; // 屏幕上的距离换成气泡里的坐标
     b.emote.text = c.emote?.icon ?? "";
     b.emote.position.set(0, -4);
-    const sel = this.selected === c.id;
     b.name.text = c.name;
-    // 名字和画面一起缩放（以默认大小 0.7 为准），不会缩小了房子、名字还是那么大
-    const mode = this.game.settings.look?.names ?? "selected";
-    b.name.visible = mode === "all" || (mode === "selected" && sel);
+    b.name.visible = showName;
     b.name.position.set(0, L((c.pose === "lie" ? 60 : 118) * this.zoom));
-    const nameTag = () => {
-      if (!b.name.visible) return;
+    b.bg.clear();
+    if (b.name.visible) {
       const nw = b.name.width + 12;
       b.bg.roundRect(-nw / 2, b.name.y - 2, nw, 18, 9).fill({ color: sel ? 0x3f7f86 : 0x2e2a33, alpha: 0.85 });
-    };
-    b.bg.clear();
-    nameTag();
+    }
+    if (sel) {
+      const ring = this.gridToScreen(c.d.pos.x, c.d.pos.y);
+      b.bg.ellipse(L(ring.x - head.x), L(ring.y - topY), L(30 * this.zoom), L(14 * this.zoom)).stroke({ width: 2.5 / ns, color: 0x3f7f86, alpha: 0.9 });
+    }
+    b.sbg.clear();
     if (c.speech) {
       b.text.text = c.speech.text;
       const tw = b.text.width, th = b.text.height;
       const pad = 8;
       const by = -th - pad * 2 - (c.emote ? 26 : 8);
-      b.text.position.set(-tw / 2, by + pad);
-      b.bg.roundRect(-tw / 2 - pad, by, tw + pad * 2, th + pad * 2, 10).fill({ color: 0xffffff, alpha: 0.96 }).stroke({ width: 1.5, color: 0xc9c2d6 });
-      b.bg.poly([-6, by + th + pad * 2, 6, by + th + pad * 2, 0, by + th + pad * 2 + 8]).fill(0xffffff);
-      b.text.visible = true;
-      b.emote.position.set(0, by - 2);
       // 气泡别超出屏幕左右边缘
       const half = (tw / 2 + pad + 6) * ns, sw = this.app.screen.width;
       const shift = L(Math.min(0, sw - (b.box.x + half)) + Math.max(0, half - b.box.x));
-      if (shift) { b.text.x += shift; b.bg.clear(); nameTag();
-        b.bg.roundRect(-tw / 2 - pad + shift, by, tw + pad * 2, th + pad * 2, 10).fill({ color: 0xffffff, alpha: 0.96 }).stroke({ width: 1.5, color: 0xc9c2d6 });
-        b.bg.poly([-6, by + th + pad * 2, 6, by + th + pad * 2, 0, by + th + pad * 2 + 8]).fill(0xffffff); }
+      b.text.position.set(-tw / 2 + shift, by + pad);
+      b.sbg.roundRect(-tw / 2 - pad + shift, by, tw + pad * 2, th + pad * 2, 10).fill({ color: 0xffffff, alpha: 0.96 }).stroke({ width: 1.5, color: 0xc9c2d6 });
+      b.sbg.poly([-6, by + th + pad * 2, 6, by + th + pad * 2, 0, by + th + pad * 2 + 8]).fill(0xffffff);
+      b.text.visible = true;
+      b.emote.position.set(0, by - 2);
     } else {
       b.text.visible = false;
-    }
-    if (sel) {
-      const ring = this.gridToScreen(c.d.pos.x, c.d.pos.y);
-      b.bg.ellipse(L(ring.x - head.x), L(ring.y - topY), L(30 * this.zoom), L(14 * this.zoom)).stroke({ width: 2.5 / ns, color: 0x3f7f86, alpha: 0.9 });
     }
   }
 
