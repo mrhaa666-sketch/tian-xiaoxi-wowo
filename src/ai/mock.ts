@@ -39,6 +39,12 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
     const r = mockChat(c, text);
     return { thought: "主人在跟我说话。", emotion: r.emotion, plan: [{ do: "tell_player", line: r.reply.replace(/（现在是本地模拟模式.*?）/, "") }, ...r.plan] };
   }
+  // 主人不在：给主人发条消息（没接 AI 时用这些句子）
+  const away = events.find((e) => e.text.startsWith("主人现在不在"));
+  if (away && Math.random() < 0.75) {
+    const line = phoneLine(c, away.text);
+    return { thought: "给主人发条消息吧。", emotion, plan: [{ do: "tell_player", line }] };
+  }
   const fed = events.find((e) => e.text.includes("主人给你准备了"));
   if (fed) {
     plan.push({ do: "eat", minutes: 10 }, { do: "tell_player", line: "谢谢，很好吃。" });
@@ -78,6 +84,27 @@ export function mockDecide(game: Game, c: Character, events: GameEvent[]): Decis
   const plan2: PlanStep[] = [step];
   if (choice.why === "想把事情做完") plan2.push({ do: "say", line: pick(["咳……再做一点就好。", ...c.d.lore.catchphrases]) });
   return { thought, emotion, plan: plan2, pace };
+}
+
+/** 没接 AI 时，角色给主人发的手机消息 */
+function phoneLine(c: Character, why: string): string {
+  const you = c.d.lore.callPlayer || "你";
+  const h = new Date().getHours();
+  const act = c.d.activity && c.d.activity !== "发呆" ? c.d.activity.replace(/（.*）/, "") : "";
+  const cp = c.d.lore.catchphrases;
+  let pool: string[];
+  if (why.includes("生病")) pool = [`${you}……我好像有点不舒服。`, "头好晕，想躺一会儿。", `${you}什么时候回来呀，有点难受。`];
+  else if (why.includes("按作息")) { const m = why.match(/该「(.+?)」/); pool = m ? [`我要去${m[1]}啦。`, `${m[1]}的时间到了。`, `${you}，我去${m[1]}了哦。`] : ["到点了。"]; }
+  else if (why.includes("早上")) pool = [`早上好，${you}。`, "起床了吗？", "今天天气怎么样？"];
+  else if (why.includes("饭点")) pool = [`${you}吃饭了吗？`, h < 15 ? "午饭吃了什么？" : "晚饭吃什么好呢。", "别忘了吃饭。"];
+  else if (why.includes("很晚")) pool = [`${you}还没睡吗？`, "早点睡哦。", "晚安。"];
+  else if (why.includes("寂寞")) pool = [`${you}在忙吗？`, "家里好安静。", `想和${you}说说话。`];
+  else if (why.includes("无聊")) pool = ["好无聊……", `${you}什么时候回来？`, "有没有什么好玩的？"];
+  else if (why.includes("心情很好")) pool = ["今天心情不错。", act ? `刚刚在${act}，挺开心的。` : "嘿嘿。"];
+  else if (why.includes("心情不太好")) pool = ["……", "有点不开心。", `${you}，能陪我说说话吗？`];
+  else pool = act ? [`我在${act}。`, `${you}在做什么呢？`] : [`${you}在做什么呢？`];
+  if (cp.length && Math.random() < 0.25) pool = [...pool, ...cp];
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function mockChat(c: Character, text: string): { reply: string; emotion: Emotion; plan: PlanStep[] } {

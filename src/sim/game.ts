@@ -66,7 +66,7 @@ export class Game {
       if (raw) {
         const data = JSON.parse(raw) as SaveData;
         const def = defaultSettings();
-        data.settings = { ...def, ...data.settings, ai: { ...def.ai, ...data.settings?.ai }, news: { ...def.news, ...data.settings?.news } };
+        data.settings = { ...def, ...data.settings, ai: { ...def.ai, ...data.settings?.ai }, news: { ...def.news, ...data.settings?.news }, phone: { ...def.phone, ...data.settings?.phone } };
         return new Game(data);
       }
     } catch (e) {
@@ -454,6 +454,60 @@ export class Game {
     if (this.clockAcc >= 20) {
       this.clockAcc = 0;
       this.checkClock();
+      this.checkPhone();
     }
+  }
+
+  // ———————————————————— 主人不在时，主动发消息 ————————————————————
+
+  /** 主人在不在看（安卓版切到后台时为 false），由界面层维护 */
+  private phoneNudged = new Map<string, number>(); // 角色 → 上次提醒 TA 可以发消息的时间
+
+  /** 角色上次给主人发消息的时间（存档里没有就用 0） */
+  lastMessageAt(c: Character) { return Math.max(c.lastTold, this.phoneNudged.get(c.id) ?? 0); }
+
+  /**
+   * 主人不在看时，每 20 秒检查一次：谁现在有理由给主人发消息（起床、饭点、无聊、想主人、生病、深夜……），
+   * 就给 TA 一个「可以发消息」的事件，由 AI（或本地规则）决定发不发、发什么。
+   */
+  private checkPhone() {
+    const ph = this.settings.phone;
+    if (this.playerWatching || ph.proactive === "off") return;
+    const now = new Date();
+    const h = now.getHours() + now.getMinutes() / 60;
+    const quiet = ph.quietStart !== ph.quietEnd && (ph.quietStart < ph.quietEnd ? h >= ph.quietStart && h < ph.quietEnd : h >= ph.quietStart || h < ph.quietEnd);
+    if (quiet) return;
+    const gap = { low: 4, normal: 2, high: 1 }[ph.proactive] * 3600_000; // 同一个人两条消息至少隔多久
+    for (const c of this.chars) {
+      if (c.hidden) continue; // 在睡觉、泡澡
+      const since = Date.now() - this.lastMessageAt(c);
+      if (since < gap * (1.3 - c.d.traits.extraversion / 200)) continue;
+      const reason = this.messageReason(c, h);
+      if (!reason) continue;
+      // 理由越充分越可能发；平均下来不会每次检查都发
+      if (Math.random() > reason.weight * 0.12) continue;
+      this.phoneNudged.set(c.id, Date.now());
+      this.emit(c, `主人现在不在（没有在看这个家），已经 ${Math.round(Math.min(since, 12 * 3600_000) / 60000)} 分钟没收到你的消息了。${reason.text}如果你想，可以用 tell_player 像发手机消息一样给主人发一两句话；不想发就不用发。`, 2);
+    }
+  }
+
+  /** 现在给主人发消息的理由（没有就返回 null） */
+  private messageReason(c: Character, h: number): { text: string; weight: number } | null {
+    const n = c.d.needs, sched = c.d.schedule;
+    const near = (hh: number, mm: number) => Math.abs(h - (hh + mm / 60)) < 0.35;
+    // 作息表里刚到点的事
+    for (const line of sched.split("\n")) {
+      const m = line.match(/^(\d{1,2}):(\d{2})\s*(.+)$/);
+      if (m && near(Number(m[1]), Number(m[2]))) return { text: `按作息，现在该「${m[3].trim()}」了。`, weight: 1 };
+    }
+    if (c.d.illness) return { text: `你生病了（${c.d.illness.name}），有点难受。`, weight: 1.2 };
+    if (h >= 6.5 && h < 9.5) return { text: "现在是早上。", weight: 0.7 };
+    if ((h >= 11.5 && h < 13) || (h >= 17.5 && h < 19.5)) return { text: "现在是饭点。", weight: 0.7 };
+    if (h >= 23 || h < 2) return { text: "已经很晚了。", weight: 0.6 };
+    if (n.social < 35) return { text: "你有点寂寞，想和人说说话。", weight: 1 };
+    if (n.fun < 30) return { text: "你很无聊。", weight: 0.8 };
+    if (n.mood > 80) return { text: "你现在心情很好。", weight: 0.5 };
+    if (n.mood < 30) return { text: "你心情不太好。", weight: 0.8 };
+    return { text: "", weight: 0.2 };
   }
 }

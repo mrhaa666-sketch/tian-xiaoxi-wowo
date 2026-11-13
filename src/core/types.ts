@@ -252,6 +252,15 @@ export interface Settings {
   wallMode: "cutaway" | "full";
   /** 画面时间预览：空 = 跟着现实时间；数字 = 固定在这个钟点（只影响画面光线） */
   previewHour?: number | null;
+  phone: PhoneSettings;
+}
+
+/** 手机（安卓版）：后台常驻和主动发消息 */
+export interface PhoneSettings {
+  keepAlive: boolean;                       // 后台常驻（通知栏有一条常驻消息）
+  proactive: "off" | "low" | "normal" | "high"; // 角色主动发消息的频率
+  quietStart: number;                       // 免打扰开始（几点），和结束相同表示不设免打扰
+  quietEnd: number;
 }
 
 export interface LogEntry {

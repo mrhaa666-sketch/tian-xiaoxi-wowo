@@ -6,6 +6,7 @@ import { Scene, type Ghost } from "./render/scene";
 import { UI } from "./ui/app";
 import { FURNITURE_BY_ID } from "./world/catalog";
 import { initSpriteStore } from "./render/spriteStore";
+import { initAndroid } from "./platform/android";
 import { ROOM_PRESETS, autoWalls, stampPreset } from "./world/presets";
 
 async function boot() {
@@ -42,6 +43,8 @@ async function boot() {
   };
   window.addEventListener("resize", () => setTimeout(() => scene.refit(true), 50));
   ui.onSettingsChanged = () => brain.reconfigure();
+  // 安卓版：后台常驻、手机通知（网页版里什么都不做）
+  void initAndroid(game, brain, ui);
   brain.onStatus = () => ui.renderTop();
 
   // 日志和列表变化时节流刷新界面

@@ -77,6 +77,10 @@ export class UI {
   onView?: (v: { mode: "all" } | { mode: "room"; name: string } | { mode: "step"; dir: 1 | -1 }) => void;
   view: { mode: "all" } | { mode: "room"; name: string } = { mode: "all" };
   onSettingsChanged?: () => void;
+  /** 安卓版：设置保存后（开关后台常驻） */
+  onSettingsSaved?: () => void;
+  /** 安卓版：请求不被省电策略限制，返回是否已允许 */
+  requestBatteryExemption?: () => Promise<boolean>;
   /** 底部抽屉打开/关闭后，画面要重新排版 */
   onLayout?: () => void;
   /** 户型应用到房子之后 */
@@ -978,6 +982,17 @@ export class UI {
         <div class="field"><label for="s-feeds">新闻来源（每行：名称 | 分类 | RSS 地址）</label>
           <textarea id="s-feeds" style="min-height:80px">${esc(s.news.feeds.map((f) => `${f.name} | ${f.category} | ${f.url}`).join("\n"))}</textarea></div>
         <div class="field"><label for="s-block">屏蔽词（逗号分隔）</label><input id="s-block" value="${esc(s.news.blockedWords.join("，"))}" /></div>
+        <h3 class="group">手机</h3>
+        <div class="help" style="margin-bottom:8px">安卓版才有用。你没在看的时候，角色会按时间和自己的状态给你发消息，消息会变成手机通知，点通知能直接聊天，也能在通知里回复。</div>
+        <label class="switch"><input type="checkbox" id="s-keep" ${s.phone.keepAlive ? "checked" : ""} /><span>后台常驻（通知栏会有一条常驻消息，角色在你不看的时候也照常生活）</span></label>
+        <div class="field"><label for="s-pro">角色主动发消息</label>
+          <select id="s-pro">${[["off", "不发"], ["low", "少一点（同一个人至少隔 4 小时）"], ["normal", "正常（至少隔 2 小时）"], ["high", "多一点（至少隔 1 小时）"]].map(([v, n]) => `<option value="${v}" ${s.phone.proactive === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div class="grid2">
+          <div class="field"><label for="s-qs">免打扰从几点</label><input id="s-qs" type="number" inputmode="numeric" min="0" max="23" value="${s.phone.quietStart}" /></div>
+          <div class="field"><label for="s-qe">到几点</label><input id="s-qe" type="number" inputmode="numeric" min="0" max="23" value="${s.phone.quietEnd}" /></div>
+        </div>
+        <div class="help">两个数一样表示不设免打扰。</div>
+        ${this.requestBatteryExemption ? `<button type="button" class="btn block" id="s-battery">允许后台运行不受省电限制</button><div class="help">有些手机会为了省电把后台应用关掉，点这里在系统设置里放行。</div>` : ""}
         <h3 class="group">画面和测试</h3>
         <label class="switch"><input type="checkbox" id="s-walls" ${s.wallMode === "full" ? "checked" : ""} /><span>房间之间的墙显示成高墙</span></label>
         <div class="field"><label for="s-hour">画面时间</label>
@@ -1012,6 +1027,10 @@ export class UI {
         if (!/^deepseek/.test(chat.value)) chat.value = "deepseek-chat";
       }
     };
+    p.querySelector<HTMLElement>("#s-battery")?.addEventListener("click", async () => {
+      const ok = await this.requestBatteryExemption?.();
+      this.flash(ok ? "已经允许了" : "请在打开的系统页面里选择「允许」");
+    });
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
     $("#s-save").onclick = () => {
       ai.provider = $<HTMLSelectElement>("#s-provider").value as typeof ai.provider;
@@ -1028,9 +1047,14 @@ export class UI {
       const ph = $<HTMLSelectElement>("#s-hour").value;
       s.previewHour = ph === "" ? null : Number(ph);
       s.timeScale = Math.min(600, Math.max(1, Number($<HTMLInputElement>("#s-scale").value) || 1));
+      s.phone.keepAlive = $<HTMLInputElement>("#s-keep").checked;
+      s.phone.proactive = $<HTMLSelectElement>("#s-pro").value as typeof s.phone.proactive;
+      const hr = (id: string, dflt: number) => { const v = Number($<HTMLInputElement>(id).value); return Number.isFinite(v) ? Math.min(23, Math.max(0, Math.round(v))) : dflt; };
+      s.phone.quietStart = hr("#s-qs", 0); s.phone.quietEnd = hr("#s-qe", 8);
       this.game.newsFetchedAt = 0;
       p.close();
       this.onSettingsChanged?.();
+      this.onSettingsSaved?.();
       this.game.save();
       this.renderTop();
       this.flash("设置已保存");

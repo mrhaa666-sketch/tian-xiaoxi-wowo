@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">恬小溪窝窝</string>
+    <string name="title_activity_main">恬小溪窝窝</string>
+    <string name="package_name">com.tianxiaoxi.wowo</string>
+    <string name="custom_url_scheme">com.tianxiaoxi.wowo</string>
+</resources>

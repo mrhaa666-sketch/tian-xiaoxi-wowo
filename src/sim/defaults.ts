@@ -156,6 +156,7 @@ export function defaultSettings(): Settings {
       blockedWords: ["死亡", "遇难", "身亡", "战争", "袭击", "枪击", "爆炸", "地震", "凶杀", "自杀", "坠毁", "政治"],
     },
     timeScale: 1,
+    phone: { keepAlive: true, proactive: "normal", quietStart: 0, quietEnd: 8 },
     wallMode: "cutaway",
   };
 }
