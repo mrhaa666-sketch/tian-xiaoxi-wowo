@@ -86,7 +86,10 @@ addEventListener("check", async (resolve) => {
       if (asleep(c, h)) continue;
       if (Date.now() - (c.lastTold || 0) < gap * (1.3 - (c.extraversion || 50) / 200)) continue;
       if (Math.random() > (ph.proactive === "max" ? 0.8 : 0.35)) continue;
-      const useAI = state.ai && state.ai.provider !== "mock" && state.ai.apiKey;
+      // The runner cannot read the foreground usage ledger.
+      // Use local templates when a daily limit is configured.
+      const useAI = state.ai && state.ai.provider !== "mock" && state.ai.apiKey
+        && !(state.ai.dailyMaxCalls > 0 || state.ai.dailyMaxCost > 0);
       const text = (useAI ? await aiLine(state.ai, c, h) : null) || templateLine(c, h);
       CapacitorNotifications.schedule([{ id: Math.floor(Math.random() * 1e9), title: c.name, body: text }]);
       inbox.push({ charId: c.id, text: text, t: Date.now() });

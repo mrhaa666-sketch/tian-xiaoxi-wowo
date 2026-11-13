@@ -114,9 +114,11 @@ export const DEEPSEEK_BASE = "https://api.deepseek.com";
 
 export class OpenAICompatLLM implements LLM {
   private jsonMode = true;
+  /** 用 JSON 模式时回过空回复的请求类型（聊天 / 做决定）：之后这一类不再用 JSON 模式 */
+  private noJson = new Set<LLMRequest["tier"]>();
   constructor(private s: AISettings) {}
 
-  async complete(req: LLMRequest): Promise<unknown> {
+  async complete(req: LLMRequest, retried = false): Promise<unknown> {
     const model = req.tier === "chat" ? this.s.chatModel : this.s.fastModel;
     const base = (this.s.provider === "deepseek" ? this.s.baseUrl || DEEPSEEK_BASE : this.s.baseUrl).replace(/\/+$/, "");
     const url = base + "/chat/completions";
@@ -126,7 +128,8 @@ export class OpenAICompatLLM implements LLM {
       max_tokens: req.maxTokens ?? 2000,
       messages: [{ role: "system", content: req.system + format }, ...req.messages],
     };
-    if (this.jsonMode) body.response_format = { type: "json_object" };
+    const useJson = this.jsonMode && !this.noJson.has(req.tier) && !retried;
+    if (useJson) body.response_format = { type: "json_object" };
     const host = (() => { try { return new URL(url).host; } catch { return url; } })();
     const t0 = Date.now();
     let r;
@@ -149,7 +152,16 @@ export class OpenAICompatLLM implements LLM {
     if (r.status >= 400) { const ex = explainStatus(r.status, r.text, this.s.provider); throw new AIError(ex.msg, ex.kind); }
     const usage = (r.json as { usage?: { prompt_tokens?: number; completion_tokens?: number } })?.usage;
     recordCall(req.tier === "chat" ? "chat" : "decide", usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
-    const content = (r.json as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message?.content ?? "";
+    const choice = (r.json as { choices?: { message?: { content?: string }; finish_reason?: string }[] })?.choices?.[0];
+    const content = choice?.message?.content ?? "";
+    // DeepSeek 的 JSON 模式偶尔只回一串空格和换行（聊天时更常见）：不用 JSON 模式马上重试一次，成功了这一类以后就不用 JSON 模式
+    if (!content.trim() && useJson) {
+      dlog("warn", "AI", `${model} 回了空回复（${choice?.finish_reason ?? "没有结束原因"}），不用 JSON 模式重试一次`);
+      const res = await this.complete(req, true);
+      this.noJson.add(req.tier);
+      dlog("info", "AI", `重试成功，${req.tier === "chat" ? "聊天" : "做决定"}以后不用 JSON 模式`);
+      return res;
+    }
     try {
       return parseJSONLoose(content);
     } catch (e) {
