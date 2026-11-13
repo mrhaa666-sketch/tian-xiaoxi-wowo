@@ -382,7 +382,7 @@ export class Brain {
     }
     c.d.chat.push({ t: Date.now(), from: "char", text: res.reply });
     if (c.d.chat.length > 200) c.d.chat.splice(0, c.d.chat.length - 200);
-    c.say(res.reply);
+    c.say(res.reply, 5, true);
     c.setEmotion(res.emotion);
     if (res.memory) this.remember(c, res.memory, 2);
     const rel = c.d.relations.player;

@@ -15,6 +15,7 @@ import type { UI } from "../ui/app";
 /** 自己写的原生插件：开 / 关前台服务（通知栏的常驻消息），请求不被省电策略限制 */
 interface KeepAlivePlugin {
   start(opts: { title: string; text: string; big?: string }): Promise<void>;
+  updateWidget(opts: { title: string; body: string; time: string }): Promise<void>;
   stop(): Promise<void>;
   requestIgnoreBatteryOptimizations(): Promise<{ granted: boolean }>;
   status(): Promise<PermStatus>;
@@ -130,8 +131,15 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
     }
   };
   await syncKeepAlive();
-  // 每分钟刷新一下常驻通知里大家在做什么
-  setInterval(() => { void syncKeepAlive(false); }, 60_000);
+  // 每分钟刷新一下常驻通知和桌面小组件里大家在做什么
+  const syncWidget = () => {
+    const awake = game.chars.filter((c) => !c.hidden).length;
+    const body = game.chars.slice(0, 8).map((c) => `${c.hidden ? "💤" : "·"} ${c.name}　${c.room} · ${c.d.activity}`).join("\n") + (game.chars.length > 8 ? `\n……还有 ${game.chars.length - 8} 个人` : "");
+    const d = new Date();
+    void KeepAlive.updateWidget({ title: `窝窝里 ${awake}/${game.chars.length} 人醒着`, body: body || "家里还没有人", time: `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` }).catch(() => {});
+  };
+  syncWidget();
+  setInterval(() => { void syncKeepAlive(false); syncWidget(); }, 60_000);
   ui.testNotify = async () => {
     const c = game.chars[0];
     if (!c) return false;

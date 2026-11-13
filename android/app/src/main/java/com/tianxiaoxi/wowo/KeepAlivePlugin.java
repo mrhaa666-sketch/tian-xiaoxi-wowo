@@ -20,6 +20,17 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "KeepAlive")
 public class KeepAlivePlugin extends Plugin {
 
+    /** 更新桌面小组件的内容 */
+    @PluginMethod
+    public void updateWidget(PluginCall call) {
+        try {
+            WowoWidget.push(getContext(), call.getString("title", "恬小溪窝窝"), call.getString("body", ""), call.getString("time", ""));
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("没能更新小组件：" + e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void start(PluginCall call) {
         Context ctx = getContext();

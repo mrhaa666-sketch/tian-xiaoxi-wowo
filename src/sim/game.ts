@@ -63,6 +63,8 @@ export class Game {
   together = new Map<string, Together>();
   /** 到了写日记的时候（由 AI 层接上：有 AI 就让 AI 写，没有就按今天的记录写） */
   onDiaryDue?: (c: Character, day: string) => void;
+  /** 有人说了话（界面层用来朗读） */
+  onSay?: (c: Character, text: string, toPlayer: boolean) => void;
 
   constructor(save: SaveData) {
     this.world = new World(save.world);
@@ -304,7 +306,7 @@ export class Game {
   }
 
   tellPlayer(c: Character, line: string) {
-    c.say(line);
+    c.say(line, 5, true);
     c.d.chat.push({ t: Date.now(), from: "char", text: line });
     c.lastTold = Date.now();
     this.log("say", `对主人：${line}`, c.id);

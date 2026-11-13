@@ -312,6 +312,7 @@ export interface LookSettings {
   mode: "light" | "dark" | "system" | "time"; // time = 天黑后自动变深色
   timeTint: boolean;                          // 界面底色跟着清晨、白天、傍晚、夜晚微微变化
   names: "none" | "selected" | "all";         // 画面上角色脚下的名字
+  voice?: "off" | "player" | "all";           // 朗读：不读 / 只读对我说的话 / 画面里的人说的话也读
 }
 
 /** 手机（安卓版）：后台常驻和主动发消息 */

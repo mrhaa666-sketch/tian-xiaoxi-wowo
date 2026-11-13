@@ -4,4 +4,5 @@
     <string name="title_activity_main">恬小溪窝窝</string>
     <string name="package_name">com.tianxiaoxi.wowo</string>
     <string name="custom_url_scheme">com.tianxiaoxi.wowo</string>
+    <string name="widget_desc">看看窝窝里的大家在做什么</string>
 </resources>

@@ -12,6 +12,7 @@ import { initAndroid } from "./platform/android";
 import { ROOM_PRESETS, autoWalls, ensureLanding, stampPreset } from "./world/presets";
 import { loadCustomHome, loadTagOverrides } from "./world/homepack";
 import { autoBackup } from "./core/backup";
+import { speak } from "./platform/voice";
 import { levelName } from "./world/world";
 
 async function boot() {
@@ -58,6 +59,12 @@ async function boot() {
   void initAndroid(game, brain, ui);
   brain.onStatus = () => ui.renderTop();
   game.onDiaryDue = (c, day) => { void brain.writeDiary(c, day); };
+  // 语音朗读：对主人说的话；选了「全部」时，正在看的房间里、或者选中的人说的话也读
+  game.onSay = (c, text, toPlayer) => {
+    const mode = game.settings.look.voice ?? "off";
+    if (mode === "off") return;
+    if (toPlayer || (mode === "all" && game.playerWatching && (scene.selected === c.id || (scene.view.mode === "room" && scene.view.name === c.room)))) speak(text, c.d);
+  };
 
   // 日志和列表变化时节流刷新界面
   let dirty = false;
