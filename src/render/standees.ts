@@ -132,6 +132,25 @@ export function drawStandee(g: Graphics, id: string, color: number, w: number, h
       g.rect(-4, -h + 10, 8, 22).fill(0xe05a5a).rect(-11, -h + 17, 22, 8).fill(0xe05a5a);
       g.rect(-1.5, -h * 0.3, 3, h * 0.3).fill(0x9aa5ad);
       break;
+    case "heater":
+      // 油汀取暖器：一片片的暖气片，开着时发红光
+      if (st.on) g.circle(0, -h / 2, 50).fill({ color: 0xff9a5a, alpha: 0.25 });
+      for (let i = 0; i < 5; i++) g.roundRect(L + 4 + i * ((w - 8) / 5), -h + 6, (w - 8) / 5 - 3, h - 14, 5).fill(st.on ? 0xff8a50 : color).stroke(stroke);
+      g.rect(L + 6, -8, 6, 8).fill(LINE).rect(R - 12, -8, 6, 8).fill(LINE);
+      break;
+    case "air_conditioner":
+      g.roundRect(L, -h, w, h * 0.75, 10).fill(color).stroke(stroke);
+      g.roundRect(L + 8, -h * 0.42, w - 16, 6, 3).fill(shade(color, 0.8));
+      g.circle(R - 12, -h + 10, 3).fill(st.on ? 0x5ad08a : 0x9aa4ad);
+      if (st.on) for (let i = 0; i < 3; i++) g.moveTo(L + 16 + i * (w - 32) / 2, -h * 0.25).lineTo(L + 10 + i * (w - 32) / 2, -h * 0.05).stroke({ width: 2, color: 0x9fd8f0, alpha: 0.8 });
+      break;
+    case "kotatsu":
+      // 被炉：桌面 + 垂下来的被子
+      if (st.on) g.ellipse(0, -8, w * 0.5, 14).fill({ color: 0xff9a5a, alpha: 0.25 });
+      g.roundRect(L + 2, -h * 0.75, w - 4, h * 0.75, 10).fill(color).stroke(stroke);
+      g.roundRect(L + 8, -h, w - 16, 10, 3).fill(0xc89b6d).stroke(stroke);
+      g.moveTo(L + 20, -h * 0.6).lineTo(L + 20, -6).moveTo(R - 20, -h * 0.6).lineTo(R - 20, -6).stroke({ width: 2, color: dark, alpha: 0.5 });
+      break;
     default:
       g.roundRect(L, -h, w, h, 6).fill(color).stroke(stroke);
   }

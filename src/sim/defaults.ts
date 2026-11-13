@@ -39,7 +39,7 @@ const defaultSkills = (): Skills => ({ cooking: 1, music: 0, art: 0, gaming: 1, 
 export const defaultLore = (): Lore => ({
   selfName: "我", callPlayer: "主人", speechStyle: "", catchphrases: [], backstory: "", goals: "", fears: "",
   likesTopics: "", dislikesTopics: "", habits: "", chronotype: "normal", sickBehavior: "normal", conflictStyle: "",
-  favoriteRoom: "", favoriteFurniture: [], presetRelations: [], custom: [],
+  favoriteRoom: "", favoriteFurniture: [], likedTags: [], dislikedTags: [], heat: "normal", presetRelations: [], custom: [],
 });
 const defaultProfile = (): Profile => ({ age: 20, birthday: "", job: "", hobbies: "", likes: [], dislikes: [] });
 
@@ -146,6 +146,9 @@ export function defaultSettings(): Settings {
       chatModel: "claude-opus-5-5",
       maxCallsPerMinute: 6,
       decisionInterval: 90,
+      embedBaseUrl: "",
+      embedKey: "",
+      embedModel: "BAAI/bge-m3",
     },
     news: {
       enabled: true,
@@ -157,7 +160,8 @@ export function defaultSettings(): Settings {
     },
     timeScale: 1,
     phone: { keepAlive: true, proactive: "normal", quietStart: 0, quietEnd: 8 },
-    look: { palette: "pink", mode: "light", timeTint: false },
+    weather: { mode: "manual", manual: "sunny", manualTemp: 22 },
+    look: { palette: "pink", mode: "light", timeTint: false, names: "selected" },
     wallMode: "cutaway",
   };
 }

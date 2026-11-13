@@ -2,6 +2,8 @@
 // 角色详情、建造、动态从底部弹出（抽屉）；聊天、设置、编辑角色是全屏页面。
 // 电脑上运行时，整个游戏显示在屏幕中央一个手机大小的框里。
 import type { Brain } from "../ai/brain";
+import { WEATHER_CN, type WeatherKind } from "../core/types";
+import { geocode, locate, weatherLine, FEELING_CN, feeling } from "../sim/climate";
 import { CHRONOTYPE_CN, EMOTION_CN, NEED_CN, SICK_CN, type Lore, NEED_ORDER, SKILL_CN, TRAIT_CN, type CharacterData, type Needs, type Skills, type Traits } from "../core/types";
 import { describeNow, hhmm } from "../core/time";
 import type { Character } from "../sim/character";
@@ -9,6 +11,10 @@ import { PERSONA_TEMPLATE, SCHEDULE_TEMPLATE, defaultSettings, newCharacter, ran
 import { Game } from "../sim/game";
 import { FLOORS, FOODS, FURNITURE, FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
 import { ROOM_PRESETS } from "../world/presets";
+import { levelName } from "../world/world";
+import { assetUrl } from "../render/assets";
+import { customFurniture, customRooms, exportFurniturePack, exportRoom, importHomePack, removeCustomFurniture, removeCustomRoom, setFurnitureTags } from "../world/homepack";
+import { TAG_GROUPS } from "../world/tags";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
 import { scoreOptions } from "../sim/autonomy";
@@ -82,6 +88,9 @@ export class UI {
   els: Record<string, HTMLElement> = {};
   onSelect?: (id: string | null) => void;
   /** 视角切换：全景、某个房间、前后切换 */
+  /** 现在看的楼层，切换楼层 */
+  level = 0;
+  onLevel?: (level: number) => void;
   onView?: (v: { mode: "all" } | { mode: "room"; name: string } | { mode: "step"; dir: 1 | -1 }) => void;
   view: { mode: "all" } | { mode: "room"; name: string } = { mode: "all" };
   onSettingsChanged?: () => void;
@@ -112,6 +121,8 @@ export class UI {
           <button class="pill-btn round" id="v-prev" aria-label="上一个房间">${icon("left")}</button>
           <select id="v-room" aria-label="选择房间"></select>
           <button class="pill-btn round" id="v-next" aria-label="下一个房间">${icon("right")}</button>
+          <button class="pill-btn round lv" id="v-level" aria-label="切换楼层" hidden>1F</button>
+          <button class="pill-btn round" id="v-names" aria-label="显示名字">名</button>
         </div>
         <div class="dock" id="dock">
           <div class="avatars" id="roster"></div>
@@ -139,6 +150,24 @@ export class UI {
     vb.querySelector<HTMLElement>("#v-all")!.onclick = () => this.onView?.({ mode: "all" });
     vb.querySelector<HTMLElement>("#v-prev")!.onclick = () => this.onView?.({ mode: "step", dir: -1 });
     vb.querySelector<HTMLElement>("#v-next")!.onclick = () => this.onView?.({ mode: "step", dir: 1 });
+    vb.querySelector<HTMLElement>("#v-names")!.onclick = () => {
+      // 名字：不显示 → 只显示选中的 → 全部显示
+      const lk = this.game.settings.look;
+      lk.names = lk.names === "none" ? "selected" : lk.names === "selected" ? "all" : "none";
+      this.flash({ none: "不显示名字", selected: "只显示选中的人的名字", all: "显示所有人的名字" }[lk.names]);
+      this.renderView();
+      this.game.save();
+    };
+    vb.querySelector<HTMLElement>("#v-level")!.onclick = (e) => {
+      const lv = this.game.world.levels();
+      const top = lv[lv.length - 1];
+      const pr = this.els.phone.getBoundingClientRect();
+      const ev = e as MouseEvent;
+      this.showActionMenu("去几楼", [
+        ...lv.slice().reverse().map((l) => ({ label: levelName(l), note: l === this.level ? "现在在这层" : `${this.game.world.rooms(l).length} 个房间`, act: () => this.onLevel?.(l) })),
+        ...(this.build.on ? [{ label: `盖${levelName(top + 1)}`, note: "先切过去，再铺地板或放房间", act: () => this.onLevel?.(top + 1) }] : []),
+      ], ev.clientX - pr.left, ev.clientY - pr.top + 160);
+    };
     const sel = vb.querySelector<HTMLSelectElement>("#v-room")!;
     sel.onchange = () => (sel.value ? this.onView?.({ mode: "room", name: sel.value }) : this.onView?.({ mode: "all" }));
 
@@ -168,6 +197,7 @@ export class UI {
     this.sheet = s;
     this.sheetFull = false;
     this.renderSheet();
+    this.renderView();
   }
 
   closeSheet() {
@@ -364,10 +394,20 @@ export class UI {
       : s.mode === "error" ? `<button class="chip ai err" data-ai-chip title="${esc(s.message)}">AI 出错</button>`
       : `<button class="chip ai" data-ai-chip title="本地模拟模式">本地</button>`;
     const fest = this.game.todayFestivals.slice(0, 2).map((f) => `<span class="chip fest">${esc(f)}</span>`).join("");
-    const html = fest + ai;
+    const w = this.game.weather;
+    const wIcon = { sunny: "☀️", cloudy: "☁️", rain: "🌧️", snow: "❄️", fog: "🌫️", storm: "⛈️" }[w.kind];
+    const weather = `<button class="chip weather" data-w-chip>${wIcon} ${Math.round(w.temp)}°</button>`;
+    const html = fest + weather + ai;
     if (this.els.chips.innerHTML !== html) {
       this.els.chips.innerHTML = html;
       // 手机上看不到悬停提示：点一下显示原因
+      this.els.chips.querySelector<HTMLElement>("[data-w-chip]")!.onclick = () => {
+        const g = this.game;
+        const rooms = g.world.rooms().slice(0, 8).map((r) => `${r} ${Math.round(g.tempOf(r))}°`).join("，");
+        const src = g.weather.source === "auto" ? "按位置的天气预报" : g.weather.source === "manual" ? "手动设置" : "按季节估的（在设置里开自动天气）";
+        const hours = g.weather.hours?.filter((_, i) => i % 2 === 0).slice(0, 6).map((h) => `${new Date(h.t).getHours()}点 ${WEATHER_CN[h.kind]} ${Math.round(h.temp)}°`).join("、");
+        this.confirm(`外面：${weatherLine(g.weather)}\n来源：${src}${hours ? `\n接下来：${hours}` : ""}\n\n室内：${rooms}\n\n${g.chars.map((c) => `${c.name}：觉得${FEELING_CN[feeling(g.feltOf(c))]}`).join("\n")}`, () => {});
+      };
       this.els.chips.querySelector<HTMLElement>("[data-ai-chip]")!.onclick = () => {
         const st = this.brain.status;
         if (st.mode === "error") this.confirm(`AI 出错了：${st.message}\n\n要看详细的日志吗？`, () => this.openLog());
@@ -384,7 +424,12 @@ export class UI {
     vb.querySelector("#v-all")!.classList.toggle("on", this.view.mode === "all");
     const sel = vb.querySelector<HTMLSelectElement>("#v-room")!;
     const cur = this.view.mode === "room" ? this.view.name : "";
-    const html = `<option value="">选择房间</option>` + this.game.world.rooms().map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    const lvBtn = vb.querySelector<HTMLElement>("#v-level")!;
+    const levels = this.game.world.levels();
+    lvBtn.hidden = levels.length < 2 && !this.build.on && this.level === 0;
+    lvBtn.textContent = this.level >= 0 ? `${this.level + 1}F` : `B${-this.level}`;
+    vb.querySelector("#v-names")!.classList.toggle("on", this.game.settings.look.names !== "none");
+    const html = `<option value="">选择房间</option>` + this.game.world.rooms(this.level).map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
     if (sel.innerHTML !== html) sel.innerHTML = html;
     sel.value = cur;
   }
@@ -458,6 +503,110 @@ export class UI {
       document.body.appendChild(el);
     }
     return el;
+  }
+
+  /** 家具包 / 房间包的文件选择框 */
+  private homeFile() {
+    let el = document.getElementById("home-file") as HTMLInputElement | null;
+    if (!el) {
+      el = document.createElement("input");
+      el.type = "file"; el.id = "home-file"; el.hidden = true;
+      el.onchange = async () => {
+        const f = el!.files?.[0];
+        el!.value = "";
+        if (!f) return;
+        let raw: unknown;
+        try { raw = JSON.parse(await f.text()); } catch { this.flash("这个文件不是有效的家具包 / 房间包（JSON 格式不对）"); return; }
+        const r = await importHomePack(raw);
+        const msg = [r.furniture.length ? `家具：${r.furniture.join("、")}` : "", r.rooms.length ? `房间：${r.rooms.join("、")}` : ""].filter(Boolean).join("；");
+        if (r.furniture.length || r.rooms.length) this.game.log("player", `导入了 ${msg}`);
+        if (r.furniture.length) { this.furnCat = FURNITURE_BY_ID[FURNITURE.find((x) => x.name === r.furniture[0])?.id ?? ""]?.category ?? this.furnCat; this.build.tool = "furniture"; }
+        else if (r.rooms.length) this.build.tool = "room";
+        this.renderBuild();
+        this.game.changed();
+        // 新家具没写标签：问要不要让 AI 填
+        const untagged = customFurniture().filter((d) => r.furniture.includes(d.name) && !d.tags?.length);
+        const tail = untagged.length && this.game.settings.ai.provider !== "mock" ? `\n\n${untagged.map((d) => d.name).join("、")}还没有标签，可以在「管理自制」里让 AI 填。` : "";
+        if (r.problems.length || tail) this.confirm(`${msg ? `导入了 ${msg}` : "没有导入任何东西"}${r.problems.length ? `\n\n${r.problems.join("\n")}` : ""}${tail}`, () => {});
+        else this.flash(`导入了 ${msg}`);
+      };
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  /** 存一个文本文件：安卓版走系统分享，网页版直接下载 */
+  async saveFile(name: string, text: string, type = "application/json") {
+    if (this.shareFile && await this.shareFile(name, text)) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  private homeExportMenu(e: MouseEvent) {
+    const pr = this.els.phone.getBoundingClientRect();
+    const rooms = this.game.world.rooms();
+    this.showActionMenu("导出成文件", [
+      ...rooms.slice(0, 12).map((room) => ({ label: room, note: "导出成房间包", act: async () => {
+        const pack = await exportRoom(this.game.world, room);
+        if (pack) { await this.saveFile(`房间包-${room}.json`, JSON.stringify(pack, null, 1)); this.flash(`已导出「${room}」`); }
+      } })),
+      ...(customFurniture().length ? [{ label: "全部自制家具", note: `${customFurniture().length} 件`, act: async () => {
+        await this.saveFile("家具包-自制家具.json", JSON.stringify(await exportFurniturePack(), null, 1)); this.flash("已导出自制家具");
+      } }] : []),
+    ], e.clientX - pr.left, e.clientY - pr.top + 40);
+  }
+
+  /** 管理导入的家具和房间：改标签、让 AI 填标签、删除 */
+  openHomeManager() {
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>家具标签和自制内容</h2></header>
+      <div class="page-body" id="hm-body"></div>`);
+    const body = p.querySelector<HTMLElement>("#hm-body")!;
+    const render = () => {
+      const furn = customFurniture(), rooms = customRooms();
+      body.innerHTML = `
+        <h3 class="group">家具标签</h3>
+        <div class="help">标签描述家具的风格和用途，角色会喜欢或讨厌某些标签（在角色设定里改）。内置家具已经写好了，可以点开改。</div>
+        <div class="field"><select id="hm-pick">${FURNITURE.map((f) => `<option value="${f.id}">${esc(f.name)}${f.custom ? "（自制）" : ""}${f.tags?.length ? "" : " · 没有标签"}</option>`).join("")}</select></div>
+        <div id="hm-tags"></div>
+        <button class="btn small" id="hm-ai" ${this.game.settings.ai.provider === "mock" ? "disabled" : ""}>让 AI 给没有标签的家具填写</button>
+        <h3 class="group">自制家具（${furn.length}）</h3>
+        ${furn.length ? furn.map((f) => `<div class="row-item"><span>${esc(f.name)} <small>${f.w}×${f.h} · ${esc(f.category)}</small></span><button class="btn small danger" data-delf="${f.id}">删除</button></div>`).join("") : `<div class="help">还没有。在「建造」里点「导入家具包 / 房间包」。</div>`}
+        <h3 class="group">自制房间（${rooms.length}）</h3>
+        ${rooms.length ? rooms.map((r) => `<div class="row-item"><span>${esc(r.name)} <small>${r.w}×${r.h}</small></span><button class="btn small danger" data-delr="${r.id}">删除</button></div>`).join("") : `<div class="help">还没有。可以在「导出…」里把家里布置好的房间存成房间包，分享给别人。</div>`}`;
+      const pick = body.querySelector<HTMLSelectElement>("#hm-pick")!;
+      const showTags = () => {
+        const def = FURNITURE_BY_ID[pick.value];
+        const box = body.querySelector<HTMLElement>("#hm-tags")!;
+        box.innerHTML = TAG_GROUPS.map((g) => `<div class="tag-group"><small>${g.name}</small><div class="taste">${g.tags.map((t) => `<button type="button" class="taste-chip ${def.tags?.includes(t) ? "like" : ""}" data-tag="${t}">${t}</button>`).join("")}</div></div>`).join("");
+        box.querySelectorAll<HTMLElement>("[data-tag]").forEach((b) => (b.onclick = () => {
+          const t = b.dataset.tag!;
+          const cur = new Set(def.tags ?? []);
+          if (cur.has(t)) cur.delete(t); else cur.add(t);
+          setFurnitureTags(def.id, [...cur]);
+          showTags();
+        }));
+      };
+      pick.onchange = showTags;
+      showTags();
+      body.querySelectorAll<HTMLElement>("[data-delf]").forEach((b) => (b.onclick = () => this.confirm(`删掉「${FURNITURE_BY_ID[b.dataset.delf!]?.name}」？家里摆着的也会一起拿走。`, async () => {
+        for (const c of this.game.chars) if (c.run?.furniture?.def === b.dataset.delf) c.setPlan([], true);
+        await removeCustomFurniture(this.game.world, b.dataset.delf!); this.game.changed(); render();
+      })));
+      body.querySelectorAll<HTMLElement>("[data-delr]").forEach((b) => (b.onclick = () => { removeCustomRoom(b.dataset.delr!); render(); }));
+      body.querySelector<HTMLElement>("#hm-ai")!.onclick = async () => {
+        const todo = FURNITURE.filter((f) => !f.tags?.length);
+        if (!todo.length) { this.flash("所有家具都有标签了"); return; }
+        this.flash(`正在让 AI 给 ${todo.length} 件家具填标签…`);
+        const n = await this.brain.tagFurniture(todo);
+        this.flash(n ? `AI 填好了 ${n} 件家具的标签` : "AI 没能填写，看看设置里的 AI 是否可用");
+        render();
+      };
+    };
+    render();
   }
 
   /** packs/index.json 里列出的本地角色包，例如 [{"name":"小溪","file":"xiaoxi.json"}] */
@@ -572,12 +721,56 @@ export class UI {
       }).join("");
       tb.innerHTML = rows || `<p class="empty">还没有认识的人。</p>`;
     } else {
-      const mem = [...c.d.memories].reverse();
-      tb.innerHTML = mem.length
-        ? mem.map((m) => `<div class="row-item">${"★".repeat(m.weight)} ${esc(m.text)}<br><small>${new Date(m.t).toLocaleString("zh-CN")}</small></div>`).join("")
-        : `<p class="empty">还没有记住什么事。和 TA 聊聊天，或者让 TA 过一阵子日常生活吧。</p>`;
+      this.renderMemoryTab(c, tb);
     }
     this.renderDetail(true);
+  }
+
+  /** 记忆 / 知识库：AI 记下的事 + 主人写的资料，可以搜索、添加、删除 */
+  private memQuery = "";
+  private renderMemoryTab(c: Character, tb: HTMLElement) {
+    const bank = this.brain.mem;
+    const knowledge = c.d.memories.filter((m) => m.kind === "knowledge").length;
+    const own = c.d.memories.length - knowledge;
+    const noVec = bank.enabled ? c.d.memories.filter((m) => !bank.hasVector(c, m)).length : 0;
+    tb.innerHTML = `
+      <div class="help">${esc(c.name)}的长期记忆：TA 自己记下的事 ${own} 条，你写给 TA 的资料 ${knowledge} 条。聊天和做决定时，会${bank.enabled ? "用向量模型" : "按文字相似度"}找出和眼前的事最相关的几条。${bank.enabled ? "" : "（在设置里填上向量模型会找得更准）"}${bank.status ? `<br><small>${esc(bank.status)}</small>` : ""}</div>
+      <div class="field"><textarea id="kb-new" style="min-height:56px" placeholder="写一条资料告诉 TA，比如：主人不吃香菜；主人的生日是 3 月 8 日；我们是在高中认识的"></textarea></div>
+      <div class="pack-row"><button class="btn small primary" id="kb-add">加进知识库</button>${noVec ? `<button class="btn small" id="kb-fill">给 ${noVec} 条补上向量</button>` : ""}</div>
+      <div class="field"><input id="kb-q" placeholder="搜一搜 TA 记得什么" value="${esc(this.memQuery)}" /></div>
+      <div id="kb-list"></div>`;
+    const list = tb.querySelector<HTMLElement>("#kb-list")!;
+    const show = async () => {
+      const q = this.memQuery.trim();
+      const items = q ? await bank.recall(c, q, 20) : [...c.d.memories].reverse();
+      list.innerHTML = items.length
+        ? items.map((m) => `<div class="row-item"><span>${m.kind === "knowledge" ? "📌" : "★".repeat(m.weight)} ${esc(m.text)}<br><small>${m.kind === "knowledge" ? "主人写的资料" : new Date(m.t).toLocaleString("zh-CN")}</small></span><button class="btn small danger" data-mdel="${c.d.memories.indexOf(m)}">删</button></div>`).join("")
+        : `<p class="empty">${q ? "没找到相关的记忆。" : "还没有记住什么事。和 TA 聊聊天，或者让 TA 过一阵子日常生活吧。"}</p>`;
+      list.querySelectorAll<HTMLElement>("[data-mdel]").forEach((b) => (b.onclick = () => {
+        const m = c.d.memories[Number(b.dataset.mdel)];
+        if (m) { bank.remove(c, m); this.game.save(); void show(); }
+      }));
+    };
+    void show();
+    const q = tb.querySelector<HTMLInputElement>("#kb-q")!;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    q.oninput = () => { this.memQuery = q.value; if (timer) clearTimeout(timer); timer = setTimeout(() => void show(), 350); };
+    tb.querySelector<HTMLElement>("#kb-add")!.onclick = () => {
+      const t = tb.querySelector<HTMLTextAreaElement>("#kb-new")!;
+      const lines = t.value.split("\n").map((x) => x.trim()).filter(Boolean);
+      if (!lines.length) return;
+      for (const line of lines) bank.add(c, line, 3, "knowledge");
+      this.game.save();
+      this.flash(`加了 ${lines.length} 条资料`);
+      this.renderMemoryTab(c, tb);
+    };
+    const fill = tb.querySelector<HTMLButtonElement>("#kb-fill");
+    if (fill) fill.onclick = async () => {
+      fill.disabled = true;
+      const n = await bank.backfill(c, (d, total) => { fill.textContent = `补向量中 ${d}/${total}`; });
+      this.flash(n ? `补好了 ${n} 条` : bank.status || "没能补上，检查一下向量模型设置");
+      this.renderMemoryTab(c, tb);
+    };
   }
 
   private statusLive(c: Character) {
@@ -588,11 +781,13 @@ export class UI {
     const mood = d.needs.mood;
     const moodWord = mood >= 80 ? "很开心" : mood >= 60 ? "不错" : mood >= 40 ? "一般" : mood >= 20 ? "低落" : "很糟";
     const stressWord = d.stress >= 70 ? "压力很大" : d.stress >= 40 ? "有点压力" : "放松";
+    const felt = this.game.feltOf(c);
+    const temp = `<div class="help">🌡 ${esc(c.room)} ${Math.round(this.game.tempOf(c.room))}°C，${esc(c.name)}觉得${FEELING_CN[feeling(felt)]}</div>`;
     const ill = d.illness ? `<div class="sick">🤒 ${esc(d.illness.name)}，严重程度 ${Math.round(d.illness.severity)}。躺床休息、吃药、喝粥会好得快。</div>` : "";
     const td = d.today;
     const h = (m: number) => (m / 60).toFixed(1);
     const plan = c.queue.length ? `<div class="plan">接下来：${c.queue.map((s) => esc(c.describeStep(s))).join(" → ")}</div>` : "";
-    return `${ill}
+    return `${ill}${temp}
       <div class="mood-row">
         <div class="big-stat"><b>${Math.round(mood)}</b><span>心情 · ${moodWord}</span><i style="--p:${mood}%;--c:${NEED_COLORS.mood}"></i></div>
         <div class="big-stat"><b>${Math.round(d.stress)}</b><span>压力 · ${stressWord}</span><i style="--p:${d.stress}%;--c:${d.stress >= 70 ? "#e86a6a" : "#b9a3d6"}"></i></div>
@@ -857,9 +1052,13 @@ export class UI {
     if (b.tool === "furniture") {
       const cats = [...new Set(FURNITURE.map((f) => f.category))];
       opts = `<div class="chips-row">${cats.map((c) => `<button class="chip-btn ${this.furnCat === c ? "on" : ""}" data-cat="${esc(c)}">${esc(c)}</button>`).join("")}</div>
-        <div class="items">${FURNITURE.filter((f) => f.category === this.furnCat).map((f) => `<button class="item ${b.furniture === f.id ? "on" : ""}" data-furn="${f.id}">
-          <span class="thumb" style="--c:${hexColor(f.color)}"><img alt="" src="${asset("furniture", f.sprite ?? f.id)}" onerror="this.remove()"></span><span>${esc(f.name)}</span></button>`).join("")}</div>`;
-      hint = this.furnCat === "墙饰" || this.furnCat === "节日"
+        <div class="items">${FURNITURE.filter((f) => f.category === this.furnCat && f.id !== "stairs_down").map((f) => `<button class="item ${b.furniture === f.id ? "on" : ""}" data-furn="${f.id}">
+          <span class="thumb" style="--c:${hexColor(f.color)}"><img alt="" src="${assetUrl("furniture", f.sprite ?? f.id)}" onerror="this.remove()"></span><span>${esc(f.name)}</span></button>`).join("")}</div>`;
+      hint = this.furnCat === "楼梯"
+        ? "把楼梯放在楼下，楼上同一个位置会自动出现楼梯口。点画面上方的「1F」切到楼上，接着铺地板、放房间；角色会自己走楼梯上下楼。也可以在「房间」里直接放一间楼梯间。"
+        : this.furnCat === "冷暖"
+        ? "天冷时角色会去开取暖器、钻被炉，天热时开空调。空调挂在墙上。"
+        : this.furnCat === "墙饰" || this.furnCat === "节日"
         ? "墙饰点靠墙那一格就会挂到后墙上。室内墙默认是矮墙沿，挂上去看不到，可以挂在房子最外面的高墙上，或者在设置里把墙改成高墙。"
         : "点地板放下家具。";
     } else if (b.tool === "turn") {
@@ -881,6 +1080,7 @@ export class UI {
     }
     body.innerHTML = `<div class="sheet-head"><h2>建造</h2><button class="btn small primary" id="build-done">完成</button></div>
       <button class="plan-entry" id="open-plan"><span class="pe-ic">▦</span><span><b>户型设计（DIY 公寓）</b><small>在平面图上拼房间，一键生成整套房子</small></span></button>
+      <div class="pack-row"><button class="btn small" id="hp-import">导入家具包 / 房间包</button><button class="btn small" id="hp-export">导出…</button><button class="btn small" id="hp-manage">管理自制</button></div>
       <div class="chips-row tools">${tools.map(([k, n]) => `<button class="chip-btn ${b.tool === k ? "on" : ""}" data-tool="${k}">${n}</button>`).join("")}</div>
       ${opts}<p class="hint">${hint} 两指拖动画面、捏合缩放。</p>`;
     const on = (sel: string, fn: (el: HTMLElement) => void) => body.querySelectorAll<HTMLElement>(sel).forEach((x) => (x.onclick = () => { fn(x); this.renderBuild(); }));
@@ -892,6 +1092,9 @@ export class UI {
     on("[data-room]", (x) => (b.room = x.dataset.room!));
     body.querySelector<HTMLElement>("#build-done")!.onclick = () => this.closeSheet();
     body.querySelector<HTMLElement>("#open-plan")!.onclick = () => this.openPlanner();
+    body.querySelector<HTMLElement>("#hp-import")!.onclick = () => this.homeFile().click();
+    body.querySelector<HTMLElement>("#hp-export")!.onclick = (e) => this.homeExportMenu(e as MouseEvent);
+    body.querySelector<HTMLElement>("#hp-manage")!.onclick = () => this.openHomeManager();
     const rn = body.querySelector<HTMLInputElement>("#room-name");
     if (rn) rn.oninput = () => (b.roomName = rn.value.trim() || "新房间");
     const aw = body.querySelector<HTMLInputElement>("#auto-walls");
@@ -994,6 +1197,11 @@ export class UI {
       room.value = l.favoriteRoom;
     }
     if (l.favoriteFurniture) p.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => b.classList.toggle("like", l.favoriteFurniture!.includes(b.dataset.fav!)));
+    if (l.likedTags || l.dislikedTags) p.querySelectorAll<HTMLElement>("[data-ftag]").forEach((b) => {
+      b.classList.toggle("like", !!l.likedTags?.includes(b.dataset.ftag!));
+      b.classList.toggle("dislike", !!l.dislikedTags?.includes(b.dataset.ftag!));
+    });
+    set("#l-heat", l.heat);
     p.querySelector<HTMLDetailsElement>("details.more")!.open = true;
   }
 
@@ -1068,6 +1276,9 @@ export class UI {
           <div class="field"><label for="l-room">最喜欢待的房间</label><select id="l-room"><option value="">没有特别喜欢的</option>${[...new Set([...this.game.world.rooms(), l.favoriteRoom].filter(Boolean))].map((r) => `<option ${l.favoriteRoom === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div>
           <div class="field"><label>最喜欢的家具</label><div class="help">选中的家具 TA 会更常去用。</div>
             <div class="taste">${FURNITURE.filter((f) => f.interactions.some((i) => i.id !== "toggle")).map((f) => `<button type="button" class="taste-chip fav ${l.favoriteFurniture.includes(f.id) ? "like" : ""}" data-fav="${f.id}">${esc(f.name)}</button>`).join("")}</div></div>
+          <div class="field"><label for="l-heat">怕冷还是怕热</label><select id="l-heat">${[["normal", "普通"], ["cold", "怕冷"], ["hot", "怕热"]].map(([k, n]) => `<option value="${k}" ${l.heat === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+          <div class="field"><label>喜欢的家具风格</label><div class="help">点一下是喜欢（❤），再点是讨厌（✕），再点取消。用到、待在有这些标签的家具旁边时心情会变好（或变差），也更常去用。</div>
+            ${TAG_GROUPS.map((g) => `<div class="tag-group"><small>${g.name}</small><div class="taste">${g.tags.map((t) => `<button type="button" class="taste-chip ${l.likedTags.includes(t) ? "like" : l.dislikedTags.includes(t) ? "dislike" : ""}" data-ftag="${t}">${t}</button>`).join("")}</div></div>`).join("")}</div>
           <div class="field"><label for="l-rel">和其他角色的初始关系</label><div class="help">每行一条：名字 | 好感（-100～100）| 备注。家里有这个人时才生效。</div>
             <textarea id="l-rel" style="min-height:60px" placeholder="阿槐 | 40 | 从小一起长大">${esc(l.presetRelations.map((r) => `${r.name} | ${r.affinity} | ${r.note}`).join("\n"))}</textarea></div>
           <div class="field"><label for="l-custom">其他设定</label><div class="help">每行一条「名称：内容」，想写什么都可以，会原样告诉 AI。</div>
@@ -1099,6 +1310,11 @@ export class UI {
       }));
     }
     p.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => (b.onclick = () => b.classList.toggle("like")));
+    p.querySelectorAll<HTMLElement>("[data-ftag]").forEach((b) => (b.onclick = () => {
+      if (b.classList.contains("like")) { b.classList.remove("like"); b.classList.add("dislike"); }
+      else if (b.classList.contains("dislike")) b.classList.remove("dislike");
+      else b.classList.add("like");
+    }));
     // —— 上传图片 ——
     let upload: UploadResult | null = null;
     const runUpload = async () => {
@@ -1166,6 +1382,9 @@ export class UI {
       l.chronotype = v("#l-chrono") as Lore["chronotype"]; l.sickBehavior = v("#l-sick") as Lore["sickBehavior"];
       l.favoriteRoom = v("#l-room");
       l.favoriteFurniture = [...p.querySelectorAll<HTMLElement>("[data-fav].like")].map((x) => x.dataset.fav!);
+      l.likedTags = [...p.querySelectorAll<HTMLElement>("[data-ftag].like")].map((x) => x.dataset.ftag!);
+      l.dislikedTags = [...p.querySelectorAll<HTMLElement>("[data-ftag].dislike")].map((x) => x.dataset.ftag!);
+      l.heat = v("#l-heat") as Lore["heat"];
       l.presetRelations = v("#l-rel").split("\n").map((line) => line.split(/[|｜]/).map((x) => x.trim())).filter((q) => q[0])
         .map(([name, aff, note]) => ({ name, affinity: Math.max(-100, Math.min(100, Number(aff) || 0)), note: note ?? "" }));
       l.custom = v("#l-custom").split("\n").map((line) => line.split(/[:：]/)).filter((q) => q[0]?.trim())
@@ -1218,6 +1437,24 @@ export class UI {
           <div class="field"><label for="s-rate">每分钟最多调用</label><input id="s-rate" type="number" inputmode="numeric" min="1" max="60" value="${ai.maxCallsPerMinute}" /></div>
           <div class="field"><label for="s-interval">闲下来多久问 AI（秒）</label><input id="s-interval" type="number" inputmode="numeric" min="10" max="3600" value="${ai.decisionInterval}" /></div>
         </div>
+        <h3 class="group">长期记忆（向量模型）</h3>
+        <div class="help" style="margin-bottom:8px">每个角色有自己的知识库。填上向量模型后，聊天时会按意思找出相关的记忆，比按文字找更准。要用兼容 OpenAI 的 /embeddings 接口，比如硅基流动（https://api.siliconflow.cn/v1，模型 BAAI/bge-m3）或 OpenAI（text-embedding-3-small）。DeepSeek 没有向量模型。地址留空就按文字相似度找。</div>
+        <div class="field"><label for="s-ebase">向量模型地址</label><input id="s-ebase" value="${esc(ai.embedBaseUrl)}" inputmode="url" placeholder="https://api.siliconflow.cn/v1" /></div>
+        <div class="grid2">
+          <div class="field"><label for="s-emodel">模型名</label><input id="s-emodel" value="${esc(ai.embedModel)}" /></div>
+          <div class="field"><label for="s-ekey">Key（和上面一样就留空）</label><input id="s-ekey" type="password" value="${esc(ai.embedKey)}" autocomplete="off" /></div>
+        </div>
+        <h3 class="group">天气</h3>
+        <div class="help" style="margin-bottom:8px">自动：按你的位置查天气预报（Open-Meteo），下雨下雪、气温会跟着变，角色会觉得冷或热。不想开定位可以填城市名。</div>
+        <div class="field"><label for="s-wmode">天气来源</label><select id="s-wmode"><option value="auto" ${s.weather.mode === "auto" ? "selected" : ""}>自动（按位置的天气预报）</option><option value="manual" ${s.weather.mode === "manual" ? "selected" : ""}>手动</option></select></div>
+        <div id="s-wauto" ${s.weather.mode === "auto" ? "" : "hidden"}>
+          <div class="pack-row"><button type="button" class="btn small primary" id="s-locate">用手机定位</button><span class="help" id="s-wplace">${s.weather.place ? `现在：${esc(s.weather.place)}` : s.weather.lat != null ? `现在：${s.weather.lat}, ${s.weather.lon}` : "还没定位"}</span></div>
+          <div class="field"><label for="s-city">或者填城市</label><div class="pack-row"><input id="s-city" placeholder="例如：上海" style="flex:1" /><button type="button" class="btn small" id="s-citygo">查找</button></div></div>
+        </div>
+        <div id="s-wman" class="grid2" ${s.weather.mode === "manual" ? "" : "hidden"}>
+          <div class="field"><label for="s-wkind">天气</label><select id="s-wkind">${(Object.keys(WEATHER_CN) as WeatherKind[]).map((k) => `<option value="${k}" ${s.weather.manual === k ? "selected" : ""}>${WEATHER_CN[k]}</option>`).join("")}</select></div>
+          <div class="field"><label for="s-wtemp">室外温度（°C）</label><input id="s-wtemp" type="number" inputmode="numeric" min="-40" max="50" value="${s.weather.manualTemp}" /></div>
+        </div>
         <h3 class="group">新闻</h3>
         <label class="switch"><input type="checkbox" id="s-news" ${s.news.enabled ? "checked" : ""} /><span>角色看电视、上网时能看到真实新闻</span></label>
         <div class="field"><label for="s-feeds">新闻来源（每行：名称 | 分类 | RSS 地址）</label>
@@ -1228,6 +1465,8 @@ export class UI {
           <div class="palette-pick">${PALETTES.map(([id, name, c]) => `<button type="button" class="pal ${s.look.palette === id ? "on" : ""}" data-pal="${id}" style="--c:${c}" aria-label="${name}"><i></i><span>${name}</span></button>`).join("")}</div></div>
         <div class="field"><label for="s-mode">深色模式</label>
           <select id="s-mode">${[["light", "浅色"], ["dark", "深色"], ["system", "跟随手机系统"], ["time", "跟随时间（天黑后自动变深色）"]].map(([v, n]) => `<option value="${v}" ${s.look.mode === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div class="field"><label for="s-names">画面上的名字</label>
+          <select id="s-names">${[["none", "不显示"], ["selected", "只显示选中的人"], ["all", "全部显示（跟着画面一起缩放）"]].map(([v, n]) => `<option value="${v}" ${s.look.names === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <label class="switch"><input type="checkbox" id="s-tint" ${s.look.timeTint ? "checked" : ""} /><span>界面颜色跟着时间变化（清晨偏粉、傍晚偏橙、夜里偏蓝）</span></label>
         <h3 class="group">手机</h3>
         <div class="help" style="margin-bottom:8px">安卓版才有用。你没在看的时候，角色会按时间和自己的状态给你发消息，消息会变成手机通知，点通知能直接聊天，也能在通知里回复。</div>
@@ -1293,6 +1532,28 @@ export class UI {
       document.documentElement.dataset.palette = b.dataset.pal!;
     }));
     $<HTMLSelectElement>("#s-mode").onchange = () => { const old = s.look.mode; s.look.mode = $<HTMLSelectElement>("#s-mode").value as typeof s.look.mode; this.applyLook(); s.look.mode = old; };
+    $<HTMLSelectElement>("#s-wmode").onchange = () => {
+      const auto = $<HTMLSelectElement>("#s-wmode").value === "auto";
+      $("#s-wauto").hidden = !auto; $("#s-wman").hidden = auto;
+    };
+    const setPlace = (lat: number, lon: number, place?: string) => {
+      s.weather.lat = lat; s.weather.lon = lon; s.weather.place = place;
+      $("#s-wplace").textContent = `现在：${place ?? `${lat}, ${lon}`}`;
+    };
+    $("#s-locate").onclick = async () => {
+      $("#s-wplace").textContent = "定位中…";
+      const pos = await locate();
+      if (!pos) { $("#s-wplace").textContent = "没拿到位置（没给定位权限？可以填城市）"; return; }
+      setPlace(pos.lat, pos.lon, "当前位置");
+    };
+    $("#s-citygo").onclick = async () => {
+      const name = $<HTMLInputElement>("#s-city").value.trim();
+      if (!name) return;
+      $("#s-wplace").textContent = "查找中…";
+      const g = await geocode(name);
+      if (!g) { $("#s-wplace").textContent = "没找到这个城市"; return; }
+      setPlace(g.lat, g.lon, g.place);
+    };
     $("#s-reset").onclick = () => this.confirm("会删除所有角色、房子和聊天记录，恢复成初始状态。确定吗？", () => { Game.wipe(); location.reload(); });
     $("#s-save").onclick = () => {
       ai.provider = $<HTMLSelectElement>("#s-provider").value as typeof ai.provider;
@@ -1302,6 +1563,13 @@ export class UI {
       ai.chatModel = $<HTMLInputElement>("#s-chat").value.trim();
       ai.maxCallsPerMinute = Math.max(1, Number($<HTMLInputElement>("#s-rate").value) || 6);
       ai.decisionInterval = Math.max(10, Number($<HTMLInputElement>("#s-interval").value) || 90);
+      ai.embedBaseUrl = $<HTMLInputElement>("#s-ebase").value.trim();
+      ai.embedModel = $<HTMLInputElement>("#s-emodel").value.trim() || "BAAI/bge-m3";
+      ai.embedKey = $<HTMLInputElement>("#s-ekey").value.trim();
+      s.weather.mode = $<HTMLSelectElement>("#s-wmode").value as typeof s.weather.mode;
+      s.weather.manual = $<HTMLSelectElement>("#s-wkind").value as WeatherKind;
+      s.weather.manualTemp = Math.max(-40, Math.min(50, Number($<HTMLInputElement>("#s-wtemp").value) || 22));
+      void this.game.refreshWeather(true);
       s.news.enabled = $<HTMLInputElement>("#s-news").checked;
       s.news.feeds = $<HTMLTextAreaElement>("#s-feeds").value.split("\n").map((l) => l.split("|").map((x) => x.trim())).filter((q) => q.length >= 3 && q[2]).map(([name, category, url]) => ({ name, category, url }));
       s.news.blockedWords = $<HTMLInputElement>("#s-block").value.split(/[,，\s]+/).filter(Boolean);
@@ -1311,6 +1579,7 @@ export class UI {
       s.timeScale = Math.min(600, Math.max(1, Number($<HTMLInputElement>("#s-scale").value) || 1));
       s.look.mode = $<HTMLSelectElement>("#s-mode").value as typeof s.look.mode;
       s.look.timeTint = $<HTMLInputElement>("#s-tint").checked;
+      s.look.names = $<HTMLSelectElement>("#s-names").value as typeof s.look.names;
       const pal = p.querySelector<HTMLElement>(".pal.on")?.dataset.pal;
       if (pal) s.look.palette = pal as typeof s.look.palette;
       this.applyLook();

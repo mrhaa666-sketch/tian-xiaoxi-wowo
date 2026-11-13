@@ -1,6 +1,6 @@
 // 场景渲染：地板、墙、家具、食物、角色、气泡，以及镜头（拖动、缩放）。
 import { Application, Container, FillGradient, FillPattern, Graphics, Matrix, Sprite, Text, Texture } from "pixi.js";
-import { currentHour, daylightAt, type Daylight } from "./daylight";
+import { currentHour, daylightAt, withWeather, type Daylight } from "./daylight";
 import { spriteUrl } from "./spriteStore";
 
 /** 文字按屏幕的实际清晰度渲染，不然在手机上会发糊、有颗粒 */
@@ -11,7 +11,7 @@ import type { Character } from "../sim/character";
 import type { Game } from "../sim/game";
 import { FLOOR_BY, FOOD_COLORS } from "./palette";
 import { FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
-import { footprint, key } from "../world/world";
+import { LEVEL_SPAN, footprint, key, levelOf } from "../world/world";
 import { ProceduralSkin, SpriteSkin, takeStale, type CharSkin } from "./charview";
 import { drawStandee } from "./standees";
 import { TH, TW, WALL_H, WALL_LOW, hex, shade, toGrid, toScreen } from "./iso";
@@ -36,6 +36,8 @@ function standeeWidth(def: string, w: number, h: number) {
     wall_clock: 58, wall_painting: 104, wall_poster: 66, wall_shelf: 108, curtain: 112, red_lantern: 92,
   };
   if (thin[def]) return thin[def];
+  const own = FURNITURE_BY_ID[def]?.standeeWidth;
+  if (own) return own;
   return 96 + (w - 1) * 118;
 }
 
@@ -324,11 +326,12 @@ export class Scene {
     else this.camTarget = t;
   }
 
-  private tilesBox(filter?: (room: string | undefined) => boolean) {
+  private tilesBox(filter?: (room: string | undefined) => boolean, level?: number) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const [k, t] of Object.entries(this.game.world.data.tiles)) {
       if (filter && !filter(t.room)) continue;
       const [x, y] = k.split(",").map(Number);
+      if (level !== undefined && levelOf(y) !== level) continue;
       for (const p of [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)]) {
         x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
       }
@@ -336,22 +339,36 @@ export class Scene {
     return { x0, y0: y0 - WALL_H, x1, y1 };
   }
 
+  /** 现在看的是几楼（0 = 一楼） */
+  level = 0;
+
   showAll(instant = false) {
     this.view = { mode: "all" };
-    const b = this.tilesBox();
+    let b = this.tilesBox(undefined, this.level);
+    // 还没盖东西的新楼层：看楼下那一层同样的范围，方便对着楼下的位置盖
+    if (!Number.isFinite(b.x0)) {
+      const below = this.tilesBox(undefined, this.level - 1);
+      if (Number.isFinite(below.x0)) { const dy = toScreen(0, LEVEL_SPAN).y; b = { x0: below.x0, x1: below.x1, y0: below.y0 + dy, y1: below.y1 + dy }; }
+    }
     if (Number.isFinite(b.x0)) this.fitRect(b.x0 - 20, b.y0, b.x1 + 20, b.y1 + 20, instant);
+  }
+
+  showLevel(l: number, instant = false) {
+    this.level = l;
+    this.showAll(instant);
   }
 
   showRoom(name: string, instant = false) {
     const b = this.tilesBox((r) => r === name);
     if (!Number.isFinite(b.x0)) return this.showAll(instant);
+    this.level = this.game.world.levelOfRoom(name);
     this.view = { mode: "room", name };
     this.fitRect(b.x0 - 30, b.y0, b.x1 + 30, b.y1 + 30, instant);
   }
 
   /** 单间模式下按顺序切换房间 */
   stepRoom(dir: 1 | -1) {
-    const rooms = this.game.world.rooms();
+    const rooms = this.game.world.rooms(this.level);
     if (!rooms.length) return;
     const cur = this.view.mode === "room" ? rooms.indexOf(this.view.name) : -1;
     this.showRoom(rooms[(cur + dir + rooms.length) % rooms.length]);
@@ -450,6 +467,26 @@ export class Scene {
         v.sprite.position.set(pts[0].x, pts[0].y);
         v.sprite.width = pts[1].x - pts[0].x;
         v.sprite.height = pts[3].y - pts[0].y;
+      } else if (def.stairs || f.def === "stairs_down") {
+        // 楼梯：一级一级的台阶（往上的楼梯越靠后越亮，下楼口画成往下的深色台阶）
+        const full = [toScreen(f.x, f.y), toScreen(f.x + w, f.y), toScreen(f.x + w, f.y + h), toScreen(f.x, f.y + h)];
+        v.g.poly(full.flatMap((p) => [p.x, p.y])).fill(shade(def.color, 0.85));
+        const steps = 7, down = f.def === "stairs_down";
+        for (let i = 0; i < steps; i++) {
+          const a = i / steps, b2 = (i + 1) / steps;
+          const yy = (t: number) => (f.rot ? 0 : t);
+          const xx = (t: number) => (f.rot ? t : 0);
+          const q = [toScreen(f.x + xx(a) * w, f.y + yy(a) * h), toScreen(f.x + (f.rot ? b2 * w : w), f.y + (f.rot ? 0 : a * h)), toScreen(f.x + (f.rot ? b2 * w : w), f.y + (f.rot ? h : b2 * h)), toScreen(f.x + xx(a) * w, f.y + (f.rot ? h : b2 * h))];
+          const k = down ? 0.55 + 0.06 * i : 1.18 - 0.05 * i;
+          v.g.poly(q.flatMap((p) => [p.x, p.y])).fill(shade(def.color, k)).stroke({ width: 2, color: shade(def.color, 0.6), alpha: 0.6 });
+        }
+        if (down) {
+          const c = toScreen(f.x + w / 2, f.y + h / 2);
+          v.g.poly([c.x - 14, c.y - 6, c.x + 14, c.y - 6, c.x, c.y + 12]).fill({ color: 0xffffff, alpha: 0.85 });
+        } else {
+          const c = toScreen(f.x + w / 2, f.y + 0.4);
+          v.g.poly([c.x - 14, c.y + 6, c.x + 14, c.y + 6, c.x, c.y - 12]).fill({ color: 0xffffff, alpha: 0.85 });
+        }
       } else {
         v.g.poly(pts.flatMap((p) => [p.x, p.y])).fill(def.color).stroke({ width: 4, color: shade(def.color, 1.12) });
       }
@@ -573,7 +610,7 @@ export class Scene {
       if (Math.abs(ct.zoom - this.zoom) < 0.002 && Math.abs(ct.x - this.camera.x) < 0.5 && Math.abs(ct.y - this.camera.y) < 0.5) this.camTarget = null;
     }
     const w = this.game.world;
-    this.daylight = daylightAt(currentHour(this.game.settings.previewHour));
+    this.daylight = withWeather(daylightAt(currentHour(this.game.settings.previewHour)), this.game.weather.kind);
     // 窗外颜色画在墙上，天色变了（每半小时）就重画一次墙
     const lh = Math.round(this.daylight.hour * 2);
     if (lh !== this.builtLightHour) { this.builtLightHour = lh; this.builtVersion = -1; }
@@ -606,8 +643,18 @@ export class Scene {
       skin.view.position.set(p.x, p.y);
       const onTop = c.run?.phase === "act" && c.run.interaction?.onTop;
       skin.view.visible = !c.hidden;
-      // 坐在家具上时排在立牌后面，下半身被挡住，看起来就是坐着
-      skin.view.zIndex = c.d.pos.y * 10 + (onTop ? -2 : 0);
+      // 用家具时画在家具前面还是后面：家具自己能设（摆放时长按改，或家具包里写 charLayer），
+      // 没设的话坐 / 躺在家具上时排在后面（下半身被挡住，看起来就是坐着）
+      let z = c.d.pos.y * 10 + (onTop ? -2 : 0);
+      const uf = c.run?.phase === "act" ? c.run.furniture : undefined;
+      const udef = uf && FURNITURE_BY_ID[uf.def];
+      if (uf && udef && !udef.wallMounted) {
+        const layer = uf.layer ?? udef.charLayer;
+        const fz = (uf.y + footprint(uf).h - 0.15) * 10;
+        if (layer === "above") z = fz + 0.5;
+        else if (layer === "below") z = fz - 0.5;
+      }
+      skin.view.zIndex = z;
       this.updateBubble(c);
     }
     this.applyFocus();
@@ -651,13 +698,38 @@ export class Scene {
       const skyAt = (lerp(dl.skyTop, dl.skyBottom, 16) << 16) | (lerp(dl.skyTop, dl.skyBottom, 8) << 8) | lerp(dl.skyTop, dl.skyBottom, 0);
       g.circle(x + 7, y - 5, 15).fill(skyAt);
     }
+    this.drawWeather(g, t, W, H);
     // 白天的云慢慢飘
-    if (dl.night < 0.5) for (const c of this.clouds) {
+    if (dl.night < 0.5 && this.game.weather.kind !== "rain" && this.game.weather.kind !== "storm") for (const c of this.clouds) {
       const x = (((c.x + t * c.v * 0.1) % 1.3) - 0.15) * W, y = c.y * H, s = c.s * 34;
       const a = (1 - dl.night * 2) * 0.75;
       g.ellipse(x, y, s * 1.6, s * 0.6).fill({ color: 0xffffff, alpha: a });
       g.ellipse(x - s * 0.8, y + s * 0.15, s, s * 0.45).fill({ color: 0xffffff, alpha: a });
       g.ellipse(x + s * 0.9, y + s * 0.1, s * 1.1, s * 0.5).fill({ color: 0xffffff, alpha: a });
+    }
+  }
+
+  /** 下雨、下雪、起雾、打雷（画在房子后面的天空上，像是窗外的天气） */
+  private drops = Array.from({ length: 140 }, () => ({ x: Math.random(), y: Math.random(), v: 0.6 + Math.random() * 0.6, s: Math.random() }));
+  private drawWeather(g: Graphics, t: number, W: number, H: number) {
+    const kind = this.game.weather.kind;
+    if (kind === "rain" || kind === "storm") {
+      const n = kind === "storm" ? 140 : 90;
+      for (let i = 0; i < n; i++) {
+        const d = this.drops[i];
+        const y = ((d.y + t * 0.9 * d.v) % 1.1 - 0.05) * H, x = ((d.x - t * 0.08 * d.v) % 1 + 1) % 1 * W;
+        g.moveTo(x, y).lineTo(x - 4, y + 16).stroke({ width: 1.4, color: 0xdfe8f5, alpha: 0.35 + d.s * 0.3 });
+      }
+      // 打雷：偶尔闪一下
+      if (kind === "storm" && Math.sin(t * 0.7) > 0.995 && Math.random() < 0.5) g.rect(0, 0, W, H).fill({ color: 0xffffff, alpha: 0.35 });
+    } else if (kind === "snow") {
+      for (let i = 0; i < 110; i++) {
+        const d = this.drops[i];
+        const y = ((d.y + t * 0.05 * d.v) % 1.05) * H, x = (d.x + Math.sin(t * 0.8 + d.s * 6) * 0.015) * W;
+        g.circle(x, y, 1.5 + d.s * 2).fill({ color: 0xffffff, alpha: 0.75 });
+      }
+    } else if (kind === "fog") {
+      for (let i = 0; i < 4; i++) g.ellipse(((i * 0.33 + t * 0.006) % 1.3 - 0.15) * W, H * (0.3 + i * 0.15), W * 0.5, H * 0.08).fill({ color: 0xffffff, alpha: 0.18 });
     }
   }
 
@@ -752,17 +824,25 @@ export class Scene {
     const head = this.gridToScreen(c.d.pos.x, c.d.pos.y);
     const topY = head.y - (c.pose === "lie" ? 50 : 112) * this.zoom;
     b.box.position.set(head.x, topY);
+    // 名字、气泡都跟着画面一起缩放（以默认大小 0.7 为准），缩小看全景时不会挡住房子
+    const ns = Math.max(0.45, Math.min(1.25, this.zoom / 0.7));
+    b.box.scale.set(ns);
+    const L = (v: number) => v / ns; // 屏幕上的距离换成气泡里的坐标
     b.emote.text = c.emote?.icon ?? "";
     b.emote.position.set(0, -4);
     const sel = this.selected === c.id;
     b.name.text = c.name;
-    b.name.visible = sel || this.zoom < 0.5;
-    b.name.position.set(0, (c.pose === "lie" ? 60 : 118) * this.zoom);
-    b.bg.clear();
-    if (b.name.visible) {
+    // 名字和画面一起缩放（以默认大小 0.7 为准），不会缩小了房子、名字还是那么大
+    const mode = this.game.settings.look?.names ?? "selected";
+    b.name.visible = mode === "all" || (mode === "selected" && sel);
+    b.name.position.set(0, L((c.pose === "lie" ? 60 : 118) * this.zoom));
+    const nameTag = () => {
+      if (!b.name.visible) return;
       const nw = b.name.width + 12;
       b.bg.roundRect(-nw / 2, b.name.y - 2, nw, 18, 9).fill({ color: sel ? 0x3f7f86 : 0x2e2a33, alpha: 0.85 });
-    }
+    };
+    b.bg.clear();
+    nameTag();
     if (c.speech) {
       b.text.text = c.speech.text;
       const tw = b.text.width, th = b.text.height;
@@ -774,9 +854,9 @@ export class Scene {
       b.text.visible = true;
       b.emote.position.set(0, by - 2);
       // 气泡别超出屏幕左右边缘
-      const half = tw / 2 + pad + 6, sw = this.app.screen.width;
-      const shift = Math.min(0, sw - (b.box.x + half)) + Math.max(0, half - b.box.x);
-      if (shift) { b.text.x += shift; b.bg.clear(); if (b.name.visible) { const nw = b.name.width + 12; b.bg.roundRect(-nw / 2, b.name.y - 2, nw, 18, 9).fill({ color: sel ? 0x3f7f86 : 0x2e2a33, alpha: 0.85 }); }
+      const half = (tw / 2 + pad + 6) * ns, sw = this.app.screen.width;
+      const shift = L(Math.min(0, sw - (b.box.x + half)) + Math.max(0, half - b.box.x));
+      if (shift) { b.text.x += shift; b.bg.clear(); nameTag();
         b.bg.roundRect(-tw / 2 - pad + shift, by, tw + pad * 2, th + pad * 2, 10).fill({ color: 0xffffff, alpha: 0.96 }).stroke({ width: 1.5, color: 0xc9c2d6 });
         b.bg.poly([-6, by + th + pad * 2, 6, by + th + pad * 2, 0, by + th + pad * 2 + 8]).fill(0xffffff); }
     } else {
@@ -784,7 +864,7 @@ export class Scene {
     }
     if (sel) {
       const ring = this.gridToScreen(c.d.pos.x, c.d.pos.y);
-      b.bg.ellipse(ring.x - head.x, ring.y - topY, 30 * this.zoom, 14 * this.zoom).stroke({ width: 2.5, color: 0x3f7f86, alpha: 0.9 });
+      b.bg.ellipse(L(ring.x - head.x), L(ring.y - topY), L(30 * this.zoom), L(14 * this.zoom)).stroke({ width: 2.5 / ns, color: 0x3f7f86, alpha: 0.9 });
     }
   }
 

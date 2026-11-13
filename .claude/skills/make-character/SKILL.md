@@ -28,7 +28,7 @@ description: 为「恬小溪窝窝」制作可以直接导入的角色包（一�
 - **已有作品的角色**：按原作的性格、经历、说话方式、人际关系写，不要和原作矛盾；原作没有的细节（作息、口味、喜欢的家具）按性格合理推断。只描述，不照抄原作台词。
 - `persona`：150～300 字，写身份、性格、说话方式、在意的人和事、在家里会是什么样子。
 - `schedule`：6～10 行「HH:MM 事情」，事情尽量用游戏里有的活动（起床、吃饭、工作、学习、看书、打游戏、做饭、画画、作曲、弹琴、看电视、洗澡、泡澡、睡觉）。
-- `profile.likes` / `dislikes` 只能用文档里列出的食物 id；`lore.favoriteFurniture` 只能用文档里的家具 id；`lore.favoriteRoom` 用初始户型里有的房间名（客厅、厨房、浴室、书房、卧室A、卧室B、院子），不确定就留空。
+- `profile.likes` / `dislikes` 只能用文档里列出的食物 id；`lore.favoriteFurniture` 只能用文档里的家具 id；`lore.favoriteRoom` 用初始户型里有的房间名（客厅、厨房、浴室、书房、卧室A、卧室B、院子），不确定就留空。`lore.likedTags` / `dislikedTags` 只能用 `docs/家具包和房间包格式.md` 里「家具标签」列出的标签（喜欢 3～6 个，不喜欢 0～3 个）；`lore.heat` 按角色体质写 `cold` / `normal` / `hot`。
 - `lore.presetRelations`：和其他会一起导入的角色之间的关系（名字对得上才生效，先导入谁都可以）。
 - `traits` 0～100，`skills` 0～10。
 

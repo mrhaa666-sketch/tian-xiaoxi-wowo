@@ -9,11 +9,17 @@ import { UI } from "./ui/app";
 import { FURNITURE_BY_ID } from "./world/catalog";
 import { initSpriteStore } from "./render/spriteStore";
 import { initAndroid } from "./platform/android";
-import { ROOM_PRESETS, autoWalls, stampPreset } from "./world/presets";
+import { ROOM_PRESETS, autoWalls, ensureLanding, stampPreset } from "./world/presets";
+import { loadCustomHome, loadTagOverrides } from "./world/homepack";
+import { levelName } from "./world/world";
 
 async function boot() {
   await initSpriteStore();
+  // 导入过的自制家具和房间、改过的家具标签，要在读存档之前装好
+  loadCustomHome();
+  loadTagOverrides();
   const game = Game.load();
+  void game.refreshWeather(true);
   game.newsProvider = getNews;
   const brain = new Brain(game);
   const ui = new UI(document.getElementById("app")!, game, brain);
@@ -27,8 +33,10 @@ async function boot() {
   const first = game.chars[0];
   if (first && game.world.rooms().includes(first.room)) scene.showRoom(first.room, true);
 
-  const setView = () => { ui.view = scene.view; ui.renderView(); };
+  const setView = () => { ui.view = scene.view; ui.level = scene.level; ui.renderView(); };
   setView();
+  game.onWeather = () => ui.renderTop();
+  ui.onLevel = (l) => { scene.showLevel(l); setView(); };
   ui.onView = (v) => {
     if (v.mode === "all") scene.showAll();
     else if (v.mode === "room") scene.showRoom(v.name);
@@ -133,6 +141,11 @@ async function boot() {
   };
   const moveGrab = (sx: number, sy: number) => {
     if (!grab) return;
+    // 拖到屏幕边上：画面跟着往那边移，手机上也能拖到远处的房间
+    const W = scene.app.screen.width, H = scene.app.screen.height, m = 48;
+    const ex = sx < m ? m - sx : sx > W - m ? -(sx - (W - m)) : 0;
+    const ey = sy < 110 ? 110 - sy : sy > H - 170 ? -(sy - (H - 170)) : 0;
+    if (ex || ey) scene.panBy(ex * 0.25, ey * 0.25);
     const g = scene.screenToGrid(sx, sy);
     if (grab.kind === "char") {
       // 人跟着手指走（手指按在头上，脚在下面一点）
@@ -155,6 +168,13 @@ async function boot() {
     ui.showActionMenu(name, [
       { label: "镜像", note: "左右翻过来", act: () => { f.flip = !f.flip; game.changed(); } },
       { label: "翻面", note: "朝里 / 朝外", act: () => { f.back = !f.back; game.changed(); } },
+      { label: "人物图层", note: f.layer === "above" ? "现在：人在前面" : f.layer === "below" ? "现在：人在后面" : "现在：自动", act: () => {
+        // 自动 → 人在前 → 人在后 → 自动
+        f.layer = f.layer === undefined ? "above" : f.layer === "above" ? "below" : undefined;
+        if (!f.layer) delete f.layer;
+        ui.flash(f.layer === "above" ? "用这件家具时，人画在家具前面" : f.layer === "below" ? "用这件家具时，人画在家具后面（被挡住一部分）" : "恢复自动");
+        game.changed();
+      } },
       { label: "转向", note: "横放 / 竖放", act: () => {
         const rot = (f.rot ? 0 : 1) as 0 | 1;
         if (!w.canPlace(f.def, f.x, f.y, rot, f.uid)) { ui.flash("这里转不开"); return; }
@@ -184,6 +204,7 @@ async function boot() {
         return;
       }
       c.d.pos = { x: t.x + 0.5, y: t.y + 0.5 };
+      navigator.vibrate?.(10);
       const room = w.roomOf(c.d.pos.x, c.d.pos.y);
       const fromRoom = w.roomOf(gr.from.x, gr.from.y);
       if (Math.hypot(c.d.pos.x - gr.from.x, c.d.pos.y - gr.from.y) > 1) {
@@ -203,10 +224,13 @@ async function boot() {
     if (occ) occ.setPlan([], true); // 正在用的人先停下
     f.x = gr.x; f.y = gr.y;
     w.rebuildIndex();
+    ensureLanding(w, f);
+    navigator.vibrate?.(10);
     game.log("player", `把${FURNITURE_BY_ID[f.def]?.name ?? "家具"}挪了个地方`);
     game.changed();
   };
 
+  let lastTap: { t: number; x: number; y: number } | null = null;
   const local = (e: PointerEvent | WheelEvent) => {
     const r = canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -267,7 +291,10 @@ async function boot() {
       if (cur && cur.kind === kind) w.setWall(edge.x, edge.y, edge.dir, null);
       else w.setWall(edge.x, edge.y, edge.dir, { kind, style: b.wallStyle });
     } else if (b.tool === "furniture") {
-      if (!w.addFurniture(b.furniture, tx, ty, b.rot)) return;
+      const f = w.addFurniture(b.furniture, tx, ty, b.rot);
+      if (!f) return;
+      // 楼梯：楼上同一个位置自动铺好楼梯口
+      if (ensureLanding(w, f)) ui.flash(`${levelName(game.world.levels().slice(-1)[0])}出现了楼梯口，点上方的楼层按钮可以上去接着盖`);
     } else if (b.tool === "turn") {
       const f = w.furnitureAt(tx, ty);
       if (f) f.back = !f.back;
@@ -339,7 +366,7 @@ async function boot() {
     if (prev) pointers.set(e.pointerId, p);
     if (grab) { if (prev) moveGrab(p.x, p.y); return; }
     if (dragStart && prev) {
-      const far = Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > 6;
+      const far = Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > (e.pointerType === "touch" ? 10 : 6);
       const panning = !ui.build.on || dragStart.button !== 0 || (ui.build.tool !== "floor");
       if (far) cancelPress();
       if (far && panning) {
@@ -377,6 +404,17 @@ async function boot() {
       return;
     }
     const c = scene.pickCharacter(p.x, p.y);
+    // 手机上双击空地：进入那个房间（电脑上有 dblclick）
+    if (!c && e.pointerType === "touch") {
+      const now = performance.now();
+      if (lastTap && now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30) {
+        lastTap = null;
+        const g = scene.screenToGrid(p.x, p.y);
+        const room = game.world.tile(Math.floor(g.x), Math.floor(g.y))?.room;
+        if (room) { scene.showRoom(room); setView(); return; }
+      }
+      lastTap = { t: now, x: p.x, y: p.y };
+    }
     // 已经选中了一个角色、这次点的是家具：弹出这件家具能做的事，安排 TA 去做
     if (!c && ui.selected) {
       const f = scene.pickFurniture(p.x, p.y);

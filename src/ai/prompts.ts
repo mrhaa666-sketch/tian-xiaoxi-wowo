@@ -5,6 +5,8 @@ import { currentScheduleItem, describeNow, festivalHint, parseSchedule } from ".
 import { FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
 import type { Character } from "../sim/character";
 import type { Game, GameEvent } from "../sim/game";
+import type { Memory } from "../core/types";
+import { FEELING_CN, feeling, weatherLine } from "../sim/climate";
 
 const STEP_SCHEMA = {
   type: "object",
@@ -136,6 +138,7 @@ export function loreLines(d: CharacterData): string[] {
     `作息类型：${CHRONOTYPE_CN[l.chronotype]}`, `生病时：${SICK_CN[l.sickBehavior]}`, l.habits && `习惯：${l.habits}`,
     l.conflictStyle && `闹矛盾时：${l.conflictStyle}`, l.likesTopics && `喜欢聊：${l.likesTopics}`, l.dislikesTopics && `不想聊：${l.dislikesTopics}`,
     l.favoriteRoom && `最喜欢待在：${l.favoriteRoom}`, l.favoriteFurniture.length && `最喜欢用：${l.favoriteFurniture.map((id) => FURNITURE_BY_ID[id]?.name).filter(Boolean).join("、")}`,
+    l.likedTags?.length && `喜欢的家具风格：${l.likedTags.join("、")}`, l.dislikedTags?.length && `不喜欢的家具风格：${l.dislikedTags.join("、")}`,
   ].filter(Boolean).join("；");
   out.push(`【生活】${life}`);
   if (l.custom.length) out.push(`【其他设定】${l.custom.map((c) => `${c.key}：${c.value}`).join("；")}`);
@@ -159,7 +162,7 @@ function fmtAgo(t: number) {
   return `${Math.round(m / 1440)} 天前`;
 }
 
-export function buildContext(game: Game, c: Character, events: GameEvent[]) {
+export function buildContext(game: Game, c: Character, events: GameEvent[], recalled: Memory[] = []) {
   const d = c.d;
   const now = new Date();
   const t = describeNow(now);
@@ -171,6 +174,10 @@ export function buildContext(game: Game, c: Character, events: GameEvent[]) {
   lines.push(`【人设】\n${d.persona || "（主人还没写人设，按普通、友善的年轻人来演）"}`);
   lines.push(`【作息表】\n${d.schedule || "（没有作息表，按正常人的作息）"}${cur ? `\n按作息，现在大概该：${cur.text}` : ""}`);
   lines.push(`【现在】${t.date} ${t.time}（${t.period}），${t.lunar}${t.jieqi ? "，" + t.jieqi : ""}${t.weekend ? "，周末" : ""}`);
+  {
+    const felt = game.feltOf(c);
+    lines.push(`【天气和温度】外面${weatherLine(game.weather)}${game.weather.hours?.length ? `，接下来几小时：${game.weather.hours.filter((_, i) => i % 3 === 0).slice(0, 4).map((h) => `${new Date(h.t).getHours()}点${Math.round(h.temp)}°`).join("、")}` : ""}。你在的${c.room}现在 ${Math.round(game.tempOf(c.room))}°C，你觉得${FEELING_CN[feeling(felt)]}${c.d.lore.heat === "cold" ? "（你怕冷）" : c.d.lore.heat === "hot" ? "（你怕热）" : ""}。`);
+  }
   if (game.todayFestivals.length) lines.push(`【今天的节日】${game.todayFestivals.map((f) => `${f}（${festivalHint(f)}）`).join("；")}`);
   lines.push(`【基本资料】${profileLine(d)}`);
   lines.push(...loreLines(d));
@@ -214,18 +221,25 @@ export function buildContext(game: Game, c: Character, events: GameEvent[]) {
     (wantIds.has(f.uid) ? 5 : 0) + (game.world.foodsOn(f.uid).length ? 5 : 0) + (game.occupantOf(f.uid) === c ? 5 : 0);
   const furn = game.world.describeFurniture().filter((f) => f.interactions.length).map((f, i) => ({ f, i, p: prio(f) }))
     .sort((a, b) => b.p - a.p || a.i - b.i).slice(0, 60).sort((a, b) => a.i - b.i).map((x) => x.f);
-  const frows = ["【家具（id | 名称 | 房间 | 可以做的事）】"];
+  const frows = ["【家具（id | 名称 | 房间 | 可以做的事 | 标签）】"];
   for (const f of furn) {
     const occ = game.occupantOf(f.uid);
     const acts = f.interactions.map((i) => `${i.id}=${i.name}(${i.minutes[0]}-${i.minutes[1]}分钟)`).join("、");
     const foods = game.world.foodsOn(f.uid).map((x) => FOOD_BY_ID[x.kind]?.name).filter(Boolean);
-    frows.push(`- ${f.uid} | ${f.name} | ${f.room} | ${acts}${occ ? ` | ${occ === c ? "你" : occ.name}正在用` : ""}${foods.length ? ` | 上面有：${foods.join("、")}` : ""}`);
+    const tg = (f.def.tags ?? []).slice(0, 4).join("/");
+    const on = f.inst.state?.on && (f.def.warmth || f.def.climate || f.def.states?.includes("on")) ? " | 开着" : "";
+    frows.push(`- ${f.uid} | ${f.name} | ${f.room} | ${acts}${tg ? ` | ${tg}` : ""}${on}${occ ? ` | ${occ === c ? "你" : occ.name}正在用` : ""}${foods.length ? ` | 上面有：${foods.join("、")}` : ""}`);
   }
   lines.push(frows.join("\n"));
   lines.push(`【房间】${game.world.rooms().join("、")}`);
 
-  const mem = [...d.memories].sort((a, b) => b.weight - a.weight || b.t - a.t).slice(0, 12);
+  // 记忆：最重要的几条 + 最近的几条 + 和眼前的事有关的（从知识库里找出来的）
+  const own = d.memories.filter((m) => m.kind !== "knowledge");
+  const keyMem = own.slice().sort((a, b) => b.weight - a.weight || b.t - a.t).slice(0, 4);
+  const recentMem = own.slice(-4);
+  const mem = [...new Set([...keyMem, ...recentMem])].filter((m) => !recalled.includes(m)).sort((a, b) => a.t - b.t);
   if (mem.length) lines.push("【记忆】\n" + mem.map((m) => `- ${fmtAgo(m.t)}：${m.text}`).join("\n"));
+  if (recalled.length) lines.push("【想起来的事（从你的长期记忆和资料里找到的，和现在的事有关）】\n" + recalled.map((m) => `- ${m.kind === "knowledge" ? "资料" : fmtAgo(m.t)}：${m.text}`).join("\n"));
 
   const recent = game.logs.filter((l) => l.who === d.id || l.text.includes(d.name)).slice(-8);
   if (recent.length) lines.push("【最近发生的事】\n" + recent.map((l) => `- ${fmtAgo(l.t)}：${l.who ? (game.byId(l.who)?.name ?? "") : "主人"}${l.kind === "say" ? "说" : ""} ${l.text}`).join("\n"));
@@ -275,9 +289,10 @@ export const CHARACTER_SCHEMA = {
         likesTopics: str, dislikesTopics: str, habits: str,
         chronotype: { type: "string", enum: ["early", "normal", "night"] },
         sickBehavior: { type: "string", enum: ["rest", "stubborn", "clingy", "normal"] },
-        conflictStyle: str, favoriteRoom: str, favoriteFurniture: strArr,
+        conflictStyle: str, favoriteRoom: str, favoriteFurniture: strArr, likedTags: strArr, dislikedTags: strArr,
+        heat: { type: "string", enum: ["cold", "normal", "hot"] },
       },
-      required: ["selfName", "callPlayer", "speechStyle", "catchphrases", "backstory", "goals", "fears", "likesTopics", "dislikesTopics", "habits", "chronotype", "sickBehavior", "conflictStyle", "favoriteRoom", "favoriteFurniture"],
+      required: ["selfName", "callPlayer", "speechStyle", "catchphrases", "backstory", "goals", "fears", "likesTopics", "dislikesTopics", "habits", "chronotype", "sickBehavior", "conflictStyle", "favoriteRoom", "favoriteFurniture", "likedTags", "dislikedTags", "heat"],
     },
   },
   required: ["name", "persona", "schedule", "profile", "traits", "skills", "lore"],
@@ -293,5 +308,6 @@ export const CHARACTER_SYSTEM = `你在帮玩家给生活模拟游戏「恬小�
 5. profile.birthday 用「MM-DD」，不知道就留空字符串。likes / dislikes 只能从给你的食物 id 里选。
 6. traits 是 0～100 的性格分数：extraversion 外向、conscientiousness 认真、agreeableness 随和、neuroticism 敏感、openness 好奇。skills 是 0～10 的技能等级。
 7. lore.favoriteRoom 只能从给你的房间名里选（没有合适的就留空），favoriteFurniture 只能从给你的家具 id 里选 1～3 个。
-8. lore.callPlayer 是角色怎么称呼玩家，按角色性格来（比如「你」「主人」「前辈」）。
-9. 全部用简体中文。`;
+8. lore.likedTags 从给你的家具标签里选 3～6 个角色会喜欢的风格/用途，dislikedTags 选 0～3 个不喜欢的；lore.heat 是怕冷（cold）、普通（normal）还是怕热（hot）。
+9. lore.callPlayer 是角色怎么称呼玩家，按角色性格来（比如「你」「主人」「前辈」）。
+10. 全部用简体中文。`;

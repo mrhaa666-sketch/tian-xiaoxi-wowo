@@ -72,7 +72,7 @@ export function scoreOptions(game: Game, c: Character): Option[] {
     const dist = Math.abs(f.x - pos.x) + Math.abs(f.y - pos.y);
     const roomName = w.roomOf(f.x, f.y);
     for (const it of def.interactions) {
-      if (it.id === "toggle") continue;
+      if (it.id === "toggle" && !(def.warmth || def.climate)) continue;
       // 吃饭：只有桌上有饭时才有意义，按饭的饱腹值算
       if (it.tags?.includes("eat")) {
         const foods = w.foodsOn(f.uid).filter((x) => !x.forChar || x.forChar === c.id);
@@ -115,6 +115,19 @@ export function scoreOptions(game: Game, c: Character): Option[] {
       if (skillTag) s *= 1 + d.skills[skillTag] * 0.05;
       if (d.lore.favoriteFurniture.includes(f.def)) { s *= 1.4; why = why || "最喜欢的家具"; }
       if (d.lore.favoriteRoom && roomName === d.lore.favoriteRoom) s *= 1.15;
+      // 家具标签：喜欢的标签越多越想用，讨厌的就不太想
+      const ftags = def.tags ?? [];
+      const liked = ftags.filter((t) => d.lore.likedTags.includes(t));
+      const hated = ftags.filter((t) => d.lore.dislikedTags.includes(t));
+      if (liked.length) { s *= 1 + 0.15 * Math.min(3, liked.length); why = why || `喜欢它${liked.slice(0, 2).join("、")}`; }
+      if (hated.length) s *= Math.max(0.3, 1 - 0.25 * hated.length);
+      // 冷了想取暖，热了不想烤火
+      const felt = game.feltOf(c);
+      const warmAct = tags.includes("warm") || (it.id === "toggle" && !!def.warmth && !f.state?.on) || (it.id === "toggle" && !!def.climate && !f.state?.on && (felt < 16 || felt > 28));
+      if (warmAct && felt < 16) { s += (16 - felt) * 6; why = "太冷了"; }
+      if (it.id === "toggle" && def.climate && felt > 28 && !f.state?.on) { s += (felt - 28) * 6; why = "太热了"; }
+      if (tags.includes("warm") && felt > 26) s *= 0.2;
+      if (it.id === "toggle" && (def.warmth || def.climate) && f.state?.on && felt >= 18 && felt <= 26) s += 3; // 不冷了，顺手关掉
       // 压力大时更想玩、想休息
       if (d.stress > 60 && ((it.perMinute.mood ?? 0) >= 0.15 || tags.includes("rest"))) s *= 1.4;
       // 有人在睡觉的房间，不想开电视、弹琴

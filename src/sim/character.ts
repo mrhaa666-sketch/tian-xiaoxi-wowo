@@ -152,6 +152,15 @@ export class Character {
     }
     if (this.moving) d.skills.fitness = Math.min(10, d.skills.fitness + 0.0015 * m);
 
+    // —— 冷热：太冷太热都不舒服，冻久了容易感冒 ——
+    const felt = this.game.feltOf(this);
+    if (felt < 15 || felt > 29) {
+      const k2 = felt < 15 ? (15 - felt) / 10 : (felt - 29) / 8;
+      n.comfort = clamp(n.comfort - 0.15 * Math.min(2, k2) * m);
+      n.mood = clamp(n.mood - 0.05 * Math.min(2, k2) * m);
+      if (felt < 8 && !this.d.illness && Math.random() < 0.0004 * m) this.getSick("感冒");
+    }
+
     // —— 压力：需求越差涨得越快；越敏感涨得越快；工作时越随性压力越大；玩、睡、聊天会降低 ——
     const low = (["hunger", "energy", "bladder", "hygiene", "fun", "social", "comfort"] as (keyof Needs)[]).filter((x) => n[x] < 25).length;
     let ds = (low * 0.03 - 0.03) * (0.6 + k(t.neuroticism) * 0.8);
@@ -395,6 +404,14 @@ export class Character {
       return false;
     }
     const next = path[0];
+    // 走楼梯：直接到楼上 / 楼下同一个位置
+    if (Math.abs(next.y + 0.5 - this.d.pos.y) > 100) {
+      this.d.pos.x = next.x + 0.5;
+      this.d.pos.y = next.y + 0.5;
+      path.shift();
+      this.moving = true;
+      return true;
+    }
     const tx = next.x + 0.5, ty = next.y + 0.5;
     const dx = tx - this.d.pos.x, dy = ty - this.d.pos.y;
     const dist = Math.hypot(dx, dy);
@@ -456,7 +473,7 @@ export class Character {
         if (it.turnsOn) f.state = { ...f.state, on: true };
         if (["bath", "shower"].includes(it.id)) this.d.today.showered = true;
         if (it.tags?.includes("toilet")) this.d.today.toilet++;
-        if (f.def === "lamp" && it.id === "toggle") f.state = { ...f.state, on: !f.state?.on };
+        if (it.id === "toggle") f.state = { ...f.state, on: !f.state?.on };
         if (step.do === "eat" || it.tags?.includes("eat")) this.consumeFood(f);
         if (it.news) this.game.deliverNews(this, FURNITURE_BY_ID[f.def].name);
         if (it.tags?.includes("rest") && this.d.illness) this.showEmote("💤", 4);

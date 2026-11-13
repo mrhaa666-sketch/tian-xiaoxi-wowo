@@ -2,7 +2,7 @@
 // 户型只记录「哪里有什么类型的房间、门开在哪」，家具按房间类型自动摆放。
 import { FURNITURE_BY_ID } from "./catalog";
 import { autoWalls } from "./presets";
-import { World, key, wkey } from "./world";
+import { World, key, levelOf, wkey } from "./world";
 
 export interface RoomKind {
   id: string;
@@ -229,6 +229,7 @@ export function uniqueName(plan: Plan, base: string, except?: string) {
 export function planFromWorld(world: World): Plan {
   const byName = new Map<string, Set<string>>();
   for (const [k, t] of Object.entries(world.data.tiles)) {
+    if (levelOf(Number(k.split(",")[1])) !== 0) continue; // 户型设计只管一楼，楼上不动
     const name = t.room ?? "房间";
     if (!byName.has(name)) byName.set(name, new Set());
     byName.get(name)!.add(k);
@@ -249,7 +250,7 @@ export function planFromWorld(world: World): Plan {
       rooms.push({ id: planId(), kind: guess(name), name: part === 1 ? name : `${name}${part}`, x: sx, y: sy, w, h });
     }
   }
-  const doors = Object.entries(world.data.walls).filter(([, w]) => w.kind === "door").map(([k]) => k);
+  const doors = Object.entries(world.data.walls).filter(([k, w]) => w.kind === "door" && levelOf(Number(k.split(",")[1])) === 0).map(([k]) => k);
   const plan = { rooms, doors };
   ensureDoors(plan);
   return plan;
@@ -258,18 +259,30 @@ export function planFromWorld(world: World): Plan {
 /** 按户型重新生成房子：清空原来的地板、墙和家具，每个房间按类型摆上默认家具 */
 export function applyPlan(world: World, plan: Plan) {
   // 新房间可能加在原来房子的左边或上面（坐标是负数），先整体挪回从 0 开始
+  let sdx = 0, sdy = 0;
   if (plan.rooms.length) {
     const dx = -Math.min(...plan.rooms.map((r) => r.x)), dy = -Math.min(...plan.rooms.map((r) => r.y));
+    sdx = dx; sdy = dy;
     if (dx || dy) {
       for (const r of plan.rooms) { r.x += dx; r.y += dy; }
       plan.doors = plan.doors.map((k) => { const [x, y, d] = k.split(","); return `${Number(x) + dx},${Number(y) + dy},${d}`; });
     }
   }
   ensureDoors(plan);
-  world.data.tiles = {};
-  world.data.walls = {};
-  world.data.furniture = [];
-  world.data.foods = [];
+  // 只重建一楼：楼上的地板、墙、家具原样留着
+  const upper = (k: string) => levelOf(Number(k.split(",")[1])) !== 0;
+  world.data.tiles = Object.fromEntries(Object.entries(world.data.tiles).filter(([k]) => upper(k)));
+  world.data.walls = Object.fromEntries(Object.entries(world.data.walls).filter(([k]) => upper(k)));
+  world.data.furniture = world.data.furniture.filter((f) => levelOf(f.y) !== 0);
+  const kept = new Set(world.data.furniture.map((f) => f.uid));
+  world.data.foods = world.data.foods.filter((f) => !!f.furniture && kept.has(f.furniture));
+  // 一楼整体挪了位置：楼上跟着挪，楼梯才对得上
+  if (sdx || sdy) {
+    const mv = (k: string) => { const p = k.split(","); p[0] = String(Number(p[0]) + sdx); p[1] = String(Number(p[1]) + sdy); return p.join(","); };
+    world.data.tiles = Object.fromEntries(Object.entries(world.data.tiles).map(([k, v]) => [mv(k), v]));
+    world.data.walls = Object.fromEntries(Object.entries(world.data.walls).map(([k, v]) => [mv(k), v]));
+    for (const f of world.data.furniture) { f.x += sdx; f.y += sdy; }
+  }
   world.rebuildIndex();
   if (!plan.rooms.length) return;
 

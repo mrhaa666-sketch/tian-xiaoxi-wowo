@@ -6,6 +6,8 @@ import { buildStarterHouse } from "../world/presets";
 import { World, uid } from "../world/world";
 import { Character, clamp } from "./character";
 import { defaultSettings, normalizeCharacter, sampleCharacters } from "./defaults";
+import type { WeatherNow } from "../core/types";
+import { FEELING_CN, feeling, feltTemp, fetchForecast, roomTemps, seasonTemp, weatherFromSettings, weatherLine } from "./climate";
 
 const SAVE_KEY = "wowo-save-v1";
 
@@ -46,6 +48,14 @@ export class Game {
   private chatListeners = new Set<(c: Character, text: string) => void>();
   private clockAcc = 0;
   private talkCounter = new Map<string, { n: number; since: number }>();
+  /** 现在的天气（自动模式下每 30 分钟查一次） */
+  weather: WeatherNow = { kind: "sunny", temp: seasonTemp(), updatedAt: 0, source: "season" };
+  private temps = new Map<string, number>();
+  private tempsAt = 0;
+  private weatherAt = 0;
+  private weatherBusy = false;
+  private coldTold = new Map<string, number>();
+  onWeather?: () => void;
 
   constructor(save: SaveData) {
     this.world = new World(save.world);
@@ -66,7 +76,7 @@ export class Game {
       if (raw) {
         const data = JSON.parse(raw) as SaveData;
         const def = defaultSettings();
-        data.settings = { ...def, ...data.settings, ai: { ...def.ai, ...data.settings?.ai }, news: { ...def.news, ...data.settings?.news }, phone: { ...def.phone, ...data.settings?.phone }, look: { ...def.look, ...data.settings?.look } };
+        data.settings = { ...def, ...data.settings, ai: { ...def.ai, ...data.settings?.ai }, news: { ...def.news, ...data.settings?.news }, phone: { ...def.phone, ...data.settings?.phone }, look: { ...def.look, ...data.settings?.look }, weather: { ...def.weather, ...data.settings?.weather } };
         return new Game(data);
       }
     } catch (e) {
@@ -474,6 +484,56 @@ export class Game {
       this.clockAcc = 0;
       this.checkClock();
       this.checkPhone();
+      this.checkCold();
+    }
+    if (Date.now() - this.weatherAt > 30 * 60_000) void this.refreshWeather();
+  }
+
+  // ———————————————————— 天气和温度 ————————————————————
+
+  /** 重新确定天气：手动就用设置里的；自动就按位置查预报，查不到按季节估 */
+  async refreshWeather(force = false) {
+    if (this.weatherBusy) return;
+    if (force) this.weatherAt = 0;
+    this.weatherAt = Date.now();
+    const s = this.settings.weather;
+    if (s.mode === "manual") { this.weather = weatherFromSettings(s); this.tempsAt = 0; this.onWeather?.(); return; }
+    if (s.lat == null || s.lon == null) { this.weather = { kind: this.weather.kind, temp: seasonTemp(), updatedAt: Date.now(), source: "season" }; this.onWeather?.(); return; }
+    this.weatherBusy = true;
+    try {
+      const f = await fetchForecast(s.lat, s.lon);
+      const before = this.weather;
+      if (f) this.weather = { ...f, source: "auto", place: s.place };
+      else if (this.weather.source !== "auto") this.weather = { kind: before.kind, temp: seasonTemp(), updatedAt: Date.now(), source: "season" };
+      this.tempsAt = 0;
+      // 天气变了：告诉大家（下雨、下雪是能聊的话题）
+      if (f && before.updatedAt && before.kind !== this.weather.kind) {
+        const text = `外面的天气变了：现在${weatherLine(this.weather)}。`;
+        for (const c of this.chars) this.emit(c, text, 1);
+        this.log("event", text);
+      }
+      this.onWeather?.();
+    } finally { this.weatherBusy = false; }
+  }
+
+  /** 某个房间现在几度 */
+  tempOf(room: string) {
+    if (Date.now() - this.tempsAt > 5_000) { this.temps = roomTemps(this.world, this.weather.temp); this.tempsAt = Date.now(); }
+    return this.temps.get(room) ?? this.weather.temp;
+  }
+  /** 角色觉得冷不冷 */
+  feltOf(c: Character) { return feltTemp(c, this.tempOf(c.room)); }
+
+  /** 冷了、热了会在意：告诉 TA（每人半小时最多一次），由 AI 决定去烤火、钻被炉、开空调还是忍着 */
+  private checkCold() {
+    for (const c of this.chars) {
+      const f = feeling(this.feltOf(c));
+      if (f === "ok" || f === "cool" || f === "warm") continue;
+      if (Date.now() - (this.coldTold.get(c.id) ?? 0) < 30 * 60_000) continue;
+      this.coldTold.set(c.id, Date.now());
+      const t = Math.round(this.tempOf(c.room));
+      const fixes = f === "hot" ? "可以去开空调、去凉快的房间，或者洗个澡。" : "可以去开取暖器、钻被炉、开空调、回被窝，或者去暖和的房间。";
+      this.emit(c, `你觉得${FEELING_CN[f]}（${c.room}现在 ${t}°C，外面${weatherLine(this.weather)}）。${fixes}`, 2);
     }
   }
 

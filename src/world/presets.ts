@@ -1,6 +1,7 @@
 // 内置房间：可以单独盖在任意位置，也有一整套初始小屋。
 import type { Wall } from "../core/types";
-import { World, key, wkey } from "./world";
+import { LEVEL_SPAN, World, footprint, key, levelName, levelOf, wkey } from "./world";
+import { FURNITURE_BY_ID } from "./catalog";
 
 export interface RoomPreset {
   id: string;
@@ -9,7 +10,12 @@ export interface RoomPreset {
   h: number;
   floor: string;
   wallStyle: string;
-  furniture: { def: string; x: number; y: number; rot?: 0 | 1 }[];
+  furniture: { def: string; x: number; y: number; rot?: 0 | 1; back?: boolean; flip?: boolean }[];
+  /** 不是方方正正的房间：只铺这些格子（各自的地板）；不写就铺满 w×h */
+  tiles?: { x: number; y: number; floor: string }[];
+  /** 精确的墙、门、窗（相对房间左上角）；不写就自动围墙、南边开门、北墙开窗 */
+  walls?: { x: number; y: number; dir: "N" | "W"; kind: Wall["kind"]; style: string }[];
+  custom?: boolean; // 从房间包导入的
 }
 
 export const ROOM_PRESETS: RoomPreset[] = [
@@ -40,6 +46,10 @@ export const ROOM_PRESETS: RoomPreset[] = [
     id: "study", name: "书房", w: 3, h: 3, floor: "mint", wallStyle: "sky",
     furniture: [{ def: "desk", x: 0, y: 0 }, { def: "bookshelf", x: 2, y: 0 }, { def: "chair", x: 0, y: 1 }, { def: "plant", x: 2, y: 2 }],
   },
+  {
+    id: "stairwell", name: "楼梯间", w: 2, h: 3, floor: "wood", wallStyle: "cream",
+    furniture: [{ def: "stairs", x: 0, y: 0 }],
+  },
 ];
 
 /** 在 (ox, oy) 处盖一个预设房间，房间名重复时自动加编号。 */
@@ -51,19 +61,27 @@ export function stampPreset(world: World, p: RoomPreset, ox: number, oy: number,
     while (existing.includes(`${p.name}${i}`)) i++;
     name = `${p.name}${i}`;
   }
-  for (let dx = 0; dx < p.w; dx++) {
-    for (let dy = 0; dy < p.h; dy++) {
-      const f = world.furnitureAt(ox + dx, oy + dy);
-      if (f) world.removeFurniture(f.uid);
-      world.setFloor(ox + dx, oy + dy, p.floor, name);
-    }
+  const cells = p.tiles ?? Array.from({ length: p.w * p.h }, (_, i) => ({ x: i % p.w, y: Math.floor(i / p.w), floor: p.floor }));
+  for (const c of cells) {
+    const f = world.furnitureAt(ox + c.x, oy + c.y);
+    if (f) world.removeFurniture(f.uid);
+    world.setFloor(ox + c.x, oy + c.y, c.floor, name);
   }
-  autoWalls(world, ox, oy, p.w, p.h, p.wallStyle);
-  // 南边中间开一扇门，北墙放一扇窗
-  const mid = ox + Math.floor(p.w / 2);
-  world.setWall(mid, oy + p.h, "N", { kind: "door", style: p.wallStyle });
-  if (p.w >= 4 && !world.tile(ox + p.w - 2, oy - 1)) world.setWall(ox + p.w - 2, oy, "N", { kind: "window", style: p.wallStyle });
-  for (const f of p.furniture) world.addFurniture(f.def, ox + f.x, oy + f.y, f.rot ?? 0);
+  if (p.walls) {
+    for (const w of p.walls) world.setWall(ox + w.x, oy + w.y, w.dir, { kind: w.kind, style: w.style });
+  } else {
+    autoWalls(world, ox, oy, p.w, p.h, p.wallStyle);
+    // 南边中间开一扇门，北墙放一扇窗
+    const mid = ox + Math.floor(p.w / 2);
+    world.setWall(mid, oy + p.h, "N", { kind: "door", style: p.wallStyle });
+    if (p.w >= 4 && !world.tile(ox + p.w - 2, oy - 1)) world.setWall(ox + p.w - 2, oy, "N", { kind: "window", style: p.wallStyle });
+  }
+  for (const f of p.furniture) {
+    const inst = world.addFurniture(f.def, ox + f.x, oy + f.y, f.rot ?? 0);
+    if (inst && f.back) inst.back = true;
+    if (inst && f.flip) inst.flip = true;
+    if (inst) ensureLanding(world, inst);
+  }
   return name;
 }
 
@@ -156,4 +174,29 @@ export function buildStarterHouse(world: World) {
   world.addFurniture("bench", 10, 9);
   world.addFurniture("patio_table", 11, 11);
   world.rebuildIndex();
+}
+
+/**
+ * 放了楼梯以后：楼上同一个位置没有地板的话，铺一块「楼梯口」并围上墙，在楼梯口放一个下楼的标记。
+ * 返回是否新铺了楼上的地板。
+ */
+export function ensureLanding(world: World, f: { def: string; x: number; y: number; rot: 0 | 1 }) {
+  if (!FURNITURE_BY_ID[f.def]?.stairs) return false;
+  const { w, h } = footprint(f);
+  const up = levelOf(f.y) + 1;
+  const room = `${levelName(up)}楼梯口`;
+  let made = false;
+  for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) {
+    const x = f.x + dx, y = f.y + dy + LEVEL_SPAN;
+    if (!world.tile(x, y)) { world.setFloor(x, y, "wood", room); made = true; }
+    const there = world.furnitureAt(x, y);
+    if (there && !FURNITURE_BY_ID[there.def]?.walkable) world.removeFurniture(there.uid);
+  }
+  if (made) {
+    autoWalls(world, f.x, f.y + LEVEL_SPAN, w, h, "cream", true);
+    // 楼梯口朝南开个门，方便以后接着往外盖房间
+    world.setWall(f.x, f.y + LEVEL_SPAN + h, "N", { kind: "door", style: "cream" });
+  }
+  if (!world.data.furniture.some((o) => o.def === "stairs_down" && o.x === f.x && o.y === f.y + LEVEL_SPAN)) world.addFurniture("stairs_down", f.x, f.y + LEVEL_SPAN, f.rot);
+  return made;
 }

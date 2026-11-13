@@ -1,5 +1,6 @@
 // 地板、墙、家具和食物的定义。之后换成正式素材时，只需要给定义加上 sprite 字段。
 import type { Needs, Pose } from "../core/types";
+import { DEFAULT_TAGS } from "./tags";
 
 // 每种地板、墙纸、家具都可以有一张正式素材图（texture / sprite），
 // 放在 public/assets/ 下对应的文件夹里；没有图时用代码画的占位图形。
@@ -71,7 +72,15 @@ export interface FurnitureDef {
   interactions: InteractionDef[];
   icon: string;          // 占位图上显示的字
   sprite?: string;       // 素材图文件名（不含 .png），默认等于 id
+  climate?: boolean;      // 空调：开着时把房间拉到舒服的温度
   states?: ("on" | "occupied")[]; // 有哪些状态图：<sprite>_on.png、<sprite>_occupied.png
+  standeeWidth?: number;  // 立牌宽度（像素），不写就按占地格数估算
+  custom?: boolean;       // 从家具包导入的自制家具
+  tags?: string[];        // 风格、用途标签（见 tags.ts），角色会喜欢 / 讨厌某些标签
+  /** 角色用这件家具时画在家具前面（above）还是后面（below，比如被子盖住下半身）。不写 = 按动作自动判断 */
+  charLayer?: "above" | "below";
+  stairs?: boolean;       // 楼梯：能走到上一层
+  warmth?: number;        // 放在房间里对室温的影响（摄氏度，开着时生效；空调写 0，由 climate 控制）
 }
 
 const I = (d: InteractionDef) => d;
@@ -226,6 +235,14 @@ const EXTRA: Mini[] = [
   ["cat_tower", "猫爬架", 1, 1, 120, 0xd9b38c, "装饰"],
   ["fish_tank", "鱼缸", 1, 1, 60, 0x9fd8f0, "装饰", [{ id: "watch", name: "看鱼", pose: "stand", minutes: [3, 15], perMinute: { mood: 0.4 } }]],
   ["christmas_tree", "圣诞树", 1, 1, 140, 0x3f9a5a, "节日"],
+  // 楼梯：放在楼下，走上去就到楼上同一个位置（楼上没有地板时会自动铺一小块楼梯口）
+  ["stairs", "楼梯", 1, 2, 120, 0xb98b62, "楼梯", [], { stairs: true, walkable: true, icon: "梯" }],
+  // 楼上的楼梯口（放楼梯时自动出现，走上去就下楼）
+  ["stairs_down", "下楼口", 1, 2, 2, 0x8a6a4a, "楼梯", [], { walkable: true, icon: "↓" }],
+  // 冷暖：开着时让房间暖和 / 凉快
+  ["heater", "取暖器", 1, 1, 70, 0xf2a65a, "冷暖", [{ id: "toggle", name: "开关取暖器", pose: "use", minutes: [1, 1], perMinute: {} }, { id: "warm", name: "烤火取暖", pose: "stand", minutes: [5, 30], perMinute: { comfort: 0.4, mood: 0.1 }, turnsOn: true, tags: ["warm"] }], { states: ["on"], warmth: 6 }],
+  ["air_conditioner", "空调", 1, 1, 50, 0xeef3f6, "冷暖", [{ id: "toggle", name: "开关空调", pose: "use", minutes: [1, 1], perMinute: {} }], { wallMounted: true, states: ["on"], climate: true }],
+  ["kotatsu", "被炉", 2, 1, 40, 0xe9a46a, "冷暖", [{ id: "warm", name: "钻进被炉", pose: "sit", onTop: true, minutes: [10, 90], perMinute: { comfort: 0.5, mood: 0.2, energy: 0.05 }, turnsOn: true, tags: ["warm", "rest"] }], { states: ["on"], warmth: 4, charLayer: "below" }],
   // 挂在墙上的装饰
   ["wall_clock", "挂钟", 1, 1, 40, 0xfaf5ea, "墙饰", [], { wallMounted: true }],
   ["wall_painting", "挂画", 1, 1, 50, 0xa9d8f5, "墙饰", [], { wallMounted: true }],
@@ -238,6 +255,9 @@ const EXTRA: Mini[] = [
 for (const [id, name, w, h, height, color, category, interactions = [], extra = {}] of EXTRA) {
   FURNITURE.push({ id, name, w, h, height, color, category, interactions, icon: name.slice(0, 2), ...extra });
 }
+for (const f of FURNITURE) f.tags = DEFAULT_TAGS[f.id] ?? f.tags ?? [];
+// 躺在床上、泡在浴缸里时被子 / 浴缸挡住下半身
+for (const id of ["bed", "bed_double", "bathtub"]) FURNITURE.find((f) => f.id === id)!.charLayer = "below";
 
 export const FURNITURE_BY_ID = Object.fromEntries(FURNITURE.map((f) => [f.id, f])) as Record<string, FurnitureDef>;
 

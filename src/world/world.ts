@@ -5,6 +5,14 @@ import { FURNITURE_BY_ID, type FurnitureDef, type InteractionDef } from "./catal
 export const key = (x: number, y: number) => `${x},${y}`;
 export const wkey = (x: number, y: number, d: "N" | "W") => `${x},${y},${d}`;
 
+/**
+ * 楼层：楼上的格子放在同一张网格里，往下错开 LEVEL_SPAN 格（离得很远，画面上看不到彼此）。
+ * 楼梯连着楼上同一个位置。第 0 层是一楼。
+ */
+export const LEVEL_SPAN = 1000;
+export const levelOf = (y: number) => Math.floor((y + LEVEL_SPAN / 2) / LEVEL_SPAN);
+export const levelName = (l: number) => (l >= 0 ? `${l + 1}楼` : `地下${-l}层`);
+
 let uidCounter = 0;
 export function uid(prefix: string) {
   uidCounter++;
@@ -20,6 +28,8 @@ export class World {
   data: WorldData;
   /** 被家具挡住的格子 → 家具 uid */
   private blocked = new Map<string, string>();
+  /** 楼梯占的格子 */
+  private stairs = new Set<string>();
   version = 0; // 结构变化时递增，渲染层据此重建
 
   constructor(data: WorldData) {
@@ -29,6 +39,12 @@ export class World {
 
   rebuildIndex() {
     this.blocked.clear();
+    this.stairs.clear();
+    for (const f of this.data.furniture) {
+      if (!FURNITURE_BY_ID[f.def]?.stairs) continue;
+      const { w, h } = footprint(f);
+      for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) this.stairs.add(key(f.x + dx, f.y + dy));
+    }
     for (const f of this.data.furniture) {
       const def = FURNITURE_BY_ID[f.def];
       if (!def || def.walkable || def.wallMounted) continue;
@@ -96,17 +112,26 @@ export class World {
         }
         return path;
       }
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ck = key(cur.x, cur.y);
+      // 楼梯：踩在楼梯上可以到楼上同一个位置；楼上的楼梯口可以下来
+      const portals: [number, number][] = [];
+      if (this.stairs.has(ck)) portals.push([0, LEVEL_SPAN]);
+      if (this.stairs.has(key(cur.x, cur.y - LEVEL_SPAN))) portals.push([0, -LEVEL_SPAN]);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], ...portals]) {
         const nx = cur.x + dx, ny = cur.y + dy;
         const isEnd = nx === tx && ny === ty;
+        const portal = Math.abs(dy) === LEVEL_SPAN;
         if (!(this.walkable(nx, ny) || (isEnd && allowEndBlocked && this.tile(nx, ny)))) continue;
-        if (!this.passable(cur.x, cur.y, nx, ny)) continue;
-        const g = cur.g + 1;
+        if (!portal && !this.passable(cur.x, cur.y, nx, ny)) continue;
+        const g = cur.g + (portal ? 4 : 1);
         const nk = key(nx, ny);
         if (g >= (gScore.get(nk) ?? Infinity)) continue;
         gScore.set(nk, g);
         came.set(nk, key(cur.x, cur.y));
-        open.push({ x: nx, y: ny, g, f: g + Math.abs(tx - nx) + Math.abs(ty - ny) });
+        // 估算距离时把楼层分开算：同一层按格子数，差几层每层算 4 步
+        const dl = Math.abs(levelOf(ty) - levelOf(ny));
+        const ly = (ty - levelOf(ty) * LEVEL_SPAN) - (ny - levelOf(ny) * LEVEL_SPAN);
+        open.push({ x: nx, y: ny, g, f: g + Math.abs(tx - nx) + Math.abs(ly) + dl * 4 });
       }
     }
     return null;
@@ -151,8 +176,8 @@ export class World {
           // 挂在墙上的装饰和地上的家具互不影响，但两件墙饰不能挂在同一格
           if (!!od.wallMounted !== !!def.wallMounted) continue;
           if (od.wallMounted && def.wallMounted) return false;
-          // 地毯上可以放家具，家具上不能放地毯以外的东西
-          if (!(od.walkable && !def.walkable)) return false;
+          // 地毯上可以放家具，家具上不能放地毯以外的东西；楼梯上不能放东西
+          if (!(od.walkable && !def.walkable) || od.stairs || def.stairs) return false;
         }
         // 多格家具内部不能被墙隔开
         if (dx > 0 && this.wall(tx, ty, "W")) return false;
@@ -200,10 +225,28 @@ export class World {
     return this.tile(Math.floor(x), Math.floor(y))?.room ?? "空地";
   }
 
-  rooms(): string[] {
+  rooms(level?: number): string[] {
     const s = new Set<string>();
-    for (const t of Object.values(this.data.tiles)) if (t.room) s.add(t.room);
+    for (const [k, t] of Object.entries(this.data.tiles)) {
+      if (!t.room) continue;
+      if (level !== undefined && levelOf(Number(k.slice(k.indexOf(",") + 1))) !== level) continue;
+      s.add(t.room);
+    }
     return [...s];
+  }
+
+  /** 有哪些楼层（从低到高） */
+  levels(): number[] {
+    const s = new Set<number>();
+    for (const k of Object.keys(this.data.tiles)) s.add(levelOf(Number(k.slice(k.indexOf(",") + 1))));
+    if (!s.size) s.add(0);
+    return [...s].sort((a, b) => a - b);
+  }
+
+  /** 某个房间在几楼 */
+  levelOfRoom(room: string) {
+    for (const [k, t] of Object.entries(this.data.tiles)) if (t.room === room) return levelOf(Number(k.slice(k.indexOf(",") + 1)));
+    return 0;
   }
 
   /** 房间里一个随机的可行走格子 */

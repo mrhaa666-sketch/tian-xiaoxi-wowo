@@ -20,6 +20,8 @@ export interface FurnitureInst {
   rot: 0 | 1; // 0 = 正常占地，1 = 占地的长宽对调（横放/竖放）
   back?: boolean; // 背对镜头摆放（用 <素材名>_back.png）
   flip?: boolean; // 左右镜像
+  /** 角色用这件家具时画在前面还是后面（不写就按家具本身的设定） */
+  layer?: "above" | "below";
   state?: Record<string, string | number | boolean>;
 }
 
@@ -126,6 +128,9 @@ export interface Lore {
   conflictStyle: string;  // 闹矛盾时的样子
   favoriteRoom: string;   // 最喜欢待的房间
   favoriteFurniture: string[]; // 最喜欢用的家具 id
+  likedTags: string[];    // 喜欢的家具标签（见 world/tags.ts），比如「可爱」「音乐」
+  dislikedTags: string[]; // 讨厌的家具标签
+  heat: "cold" | "normal" | "hot"; // 怕冷 / 普通 / 怕热
   presetRelations: { name: string; affinity: number; note: string }[]; // 和其他角色（按名字）的初始关系
   custom: { key: string; value: string }[]; // 其他自定义设定
 }
@@ -164,6 +169,8 @@ export interface Memory {
   t: number;
   text: string;
   weight: number; // 1 普通，2 重要，3 非常重要
+  /** knowledge = 主人手动写进知识库的资料，不会被自动清掉 */
+  kind?: "memory" | "knowledge";
 }
 
 export interface Relation {
@@ -237,6 +244,31 @@ export interface AISettings {
   chatModel: string; // 聊天
   maxCallsPerMinute: number;
   decisionInterval: number; // 同一个角色两次自主决策的最短间隔（秒）
+  /** 长期记忆用的向量模型（兼容 OpenAI 的 /embeddings 接口）。地址留空 = 不用向量，按文字相似度找记忆 */
+  embedBaseUrl: string;
+  embedKey: string;   // 留空就用上面的 API Key
+  embedModel: string;
+}
+
+/** 天气：自动 = 按手机位置查天气预报；手动 = 自己选 */
+export interface WeatherSettings {
+  mode: "auto" | "manual";
+  manual: WeatherKind;
+  manualTemp: number; // 手动时的室外温度（摄氏度）
+  lat?: number;
+  lon?: number;
+  place?: string;
+}
+export type WeatherKind = "sunny" | "cloudy" | "rain" | "snow" | "fog" | "storm";
+export const WEATHER_CN: Record<WeatherKind, string> = { sunny: "晴", cloudy: "多云", rain: "下雨", snow: "下雪", fog: "有雾", storm: "雷雨" };
+export interface WeatherNow {
+  kind: WeatherKind;
+  temp: number;      // 室外温度
+  updatedAt: number;
+  source: "auto" | "manual" | "season";
+  place?: string;
+  /** 接下来几个小时的预报（每小时一条） */
+  hours?: { t: number; kind: WeatherKind; temp: number }[];
 }
 
 export interface NewsSettings {
@@ -254,6 +286,7 @@ export interface Settings {
   previewHour?: number | null;
   phone: PhoneSettings;
   look: LookSettings;
+  weather: WeatherSettings;
 }
 
 /** 界面外观 */
@@ -261,6 +294,7 @@ export interface LookSettings {
   palette: "pink" | "purple" | "blue" | "green" | "orange" | "berry";
   mode: "light" | "dark" | "system" | "time"; // time = 天黑后自动变深色
   timeTint: boolean;                          // 界面底色跟着清晨、白天、傍晚、夜晚微微变化
+  names: "none" | "selected" | "all";         // 画面上角色脚下的名字
 }
 
 /** 手机（安卓版）：后台常驻和主动发消息 */

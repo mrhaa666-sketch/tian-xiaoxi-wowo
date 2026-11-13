@@ -1,0 +1,79 @@
+{
+ "format": "wowo-room-pack",
+ "version": 1,
+ "furniture": [
+  {
+   "id": "grand_piano",
+   "name": "三角钢琴",
+   "category": "音乐",
+   "w": 2,
+   "h": 2,
+   "height": 90,
+   "color": "#2d2a32",
+   "standeeWidth": 200,
+   "tags": [
+    "音乐",
+    "作曲",
+    "古典",
+    "高级感",
+    "黑色"
+   ],
+   "charLayer": "above",
+   "interactions": [
+    {
+     "id": "play",
+     "name": "弹三角钢琴",
+     "pose": "sit",
+     "minutes": [
+      10,
+      90
+     ],
+     "perMinute": {
+      "mood": 0.3,
+      "fun": 1
+     },
+     "tags": [
+      "music"
+     ]
+    }
+   ]
+  }
+ ],
+ "rooms": [
+  {
+   "id": "music_room",
+   "name": "音乐室",
+   "w": 5,
+   "h": 4,
+   "floor": "herringbone",
+   "wallStyle": "lilac",
+   "furniture": [
+    {
+     "def": "grand_piano",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "def": "guitar_stand",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "def": "speaker",
+     "x": 3,
+     "y": 0
+    },
+    {
+     "def": "beanbag",
+     "x": 3,
+     "y": 2
+    },
+    {
+     "def": "plant",
+     "x": 4,
+     "y": 3
+    }
+   ]
+  }
+ ]
+}

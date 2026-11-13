@@ -423,3 +423,22 @@ details.more > summary span { display: block; font-weight: 400; font-size: 12px;
 .fmenu button:active, .fmenu button:hover { background: var(--accent-soft); }
 .fmenu button.danger { color: #d0455a; }
 .fmenu small { font-weight: 400; color: var(--muted); font-size: 11px; }
+
+.tag-group { margin: 6px 0; }
+.tag-group > small { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.pack-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
+.row-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.row-item small { color: var(--muted); }
+
+/* —— 手机上的细节 —— */
+html, body { overscroll-behavior: none; }
+.statusbar, .viewpill, .dock, .tabbar, .chips, .pill-btn, .act, .item, .chip-btn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+@media (pointer: coarse) {
+  /* 输入框字号小于 16px 时，iPhone 一点就会放大页面 */
+  input, textarea, select, .field input, .field textarea, .field select { font-size: 16px !important; }
+  .chip { padding: 5px 10px; font-size: 12px; }
+  .fmenu button { padding: 12px 10px; }
+  .taste-chip { padding: 8px 12px; }
+}
+.chip.weather { cursor: pointer; }
+.pill-btn.lv { font-weight: 800; font-size: 12px; color: var(--accent-ink); }

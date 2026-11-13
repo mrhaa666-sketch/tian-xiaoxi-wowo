@@ -1,6 +1,8 @@
 // 角色包：可以提前写好、导入导出的角色文件（JSON）。格式说明见 docs/角色包格式.md。
 import type { Appearance, CharacterData, Lore, Profile, Skills, Traits } from "../core/types";
 import { FOOD_BY_ID, FURNITURE_BY_ID } from "../world/catalog";
+import { FURNITURE_TAGS } from "../world/tags";
+const TAG_SET = new Set(FURNITURE_TAGS);
 import { defaultLore, newCharacter, randomAppearance } from "./defaults";
 import type { Game } from "./game";
 import { deleteSprites, readSprites, saveSprites } from "../render/spriteStore";
@@ -98,6 +100,8 @@ export function cleanEntry(e: Record<string, unknown>): PackCharacter | null {
       chronotype: ["early", "normal", "night"].includes(l.chronotype as string) ? (l.chronotype as Lore["chronotype"]) : undefined,
       sickBehavior: ["rest", "stubborn", "clingy", "normal"].includes(l.sickBehavior as string) ? (l.sickBehavior as Lore["sickBehavior"]) : undefined,
       favoriteFurniture: strList(l.favoriteFurniture)?.filter((id) => FURNITURE_BY_ID[id]),
+      likedTags: strList(l.likedTags)?.filter((t) => TAG_SET.has(t)), dislikedTags: strList(l.dislikedTags)?.filter((t) => TAG_SET.has(t)),
+      heat: ["cold", "normal", "hot"].includes(l.heat as string) ? (l.heat as Lore["heat"]) : undefined,
       presetRelations: Array.isArray(l.presetRelations) ? (l.presetRelations as Record<string, unknown>[]).map((r) => ({ name: str(r?.name, 20) ?? "", affinity: num(r?.affinity, -100, 100) ?? 0, note: str(r?.note, 60) ?? "" })).filter((r) => r.name).slice(0, 20) : undefined,
       custom: Array.isArray(l.custom) ? (l.custom as Record<string, unknown>[]).map((c) => ({ key: str(c?.key, 20) ?? "", value: str(c?.value, 300) ?? "" })).filter((c) => c.key).slice(0, 30) : undefined,
     }),

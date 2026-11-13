@@ -61,3 +61,25 @@ export function currentHour(previewHour: number | null | undefined) {
   const d = new Date();
   return d.getHours() + d.getMinutes() / 60;
 }
+
+/** 天气对光线和天色的影响：阴天、下雨更暗更灰，下雪偏冷色，有雾发白 */
+export function withWeather(dl: Daylight, kind: string): Daylight {
+  const grey = { cloudy: 0.35, rain: 0.6, storm: 0.75, snow: 0.45, fog: 0.55 }[kind] ?? 0;
+  if (!grey) return dl;
+  const target = kind === "snow" || kind === "fog" ? 0xc9d2dc : 0x6f7785;
+  const mix = (a: number, b: number, k: number) => {
+    const ch = (sh: number) => Math.round(((a >> sh) & 255) + (((b >> sh) & 255) - ((a >> sh) & 255)) * k);
+    return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+  };
+  // 夜里天本来就黑，灰得少一点
+  const k = grey * (1 - dl.night * 0.6);
+  const dim = { cloudy: 0.94, rain: 0.86, storm: 0.8, snow: 0.97, fog: 0.92 }[kind] ?? 1;
+  const cool: [number, number, number] = kind === "snow" ? [0.97, 0.99, 1.03] : [1, 1, 1];
+  return {
+    ...dl,
+    skyTop: mix(dl.skyTop, target, k), skyBottom: mix(dl.skyBottom, target, k),
+    window: mix(dl.window, target, k * 0.8),
+    mul: dl.mul.map((v, i) => v * dim * cool[i]) as [number, number, number],
+    stars: dl.stars * (kind === "cloudy" ? 0.3 : 0), sun: dl.sun * (1 - grey * 0.9),
+  };
+}

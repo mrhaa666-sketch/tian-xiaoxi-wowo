@@ -11,6 +11,10 @@ import { CHARACTER_SCHEMA, CHARACTER_SYSTEM, CHAT_SCHEMA, CHAT_SYSTEM, DECISION_
 import { FOODS, FURNITURE } from "../world/catalog";
 import { AIError, makeLLM, type LLM } from "./provider";
 import { dlog } from "../core/log";
+import { MemoryBank } from "./memory";
+import { FURNITURE_TAGS } from "../world/tags";
+import { setFurnitureTags } from "../world/homepack";
+import type { FurnitureDef } from "../world/catalog";
 
 export type AIStatus = { mode: "mock" | "online" | "error"; message: string; callsLastMinute: number; thinking: number };
 
@@ -25,7 +29,11 @@ export class Brain {
   status: AIStatus = { mode: "mock", message: "本地模拟模式", callsLastMinute: 0, thinking: 0 };
   onStatus?: () => void;
 
+  /** 每个角色的长期记忆（知识库） */
+  mem: MemoryBank;
+
   constructor(private game: Game) {
+    this.mem = new MemoryBank(() => this.game.settings.ai);
     this.reconfigure();
   }
 
@@ -113,10 +121,12 @@ export class Brain {
     c.showEmote("…", 30);
     this.onStatus?.();
     try {
+      // 想起和眼前的事有关的记忆
+      const recalled = await this.mem.recall(c, [c.d.activity, c.room, ...events.map((e) => e.text)].join("\n"), 5).catch(() => []);
       const raw = await this.llm!.complete({
         tier: "fast",
         system: DECISION_SYSTEM,
-        messages: [{ role: "user", content: buildContext(this.game, c, events) }],
+        messages: [{ role: "user", content: buildContext(this.game, c, events, recalled) }],
         schema: DECISION_SCHEMA,
       });
       if (this.status.mode !== "online") this.setStatus("online", "AI 已连接");
@@ -240,12 +250,30 @@ export class Brain {
   }
 
   remember(c: Character, text: string, weight = 1) {
-    c.d.memories.push({ t: Date.now(), text, weight });
-    // 记忆太多时，先丢掉最旧的普通记忆
-    if (c.d.memories.length > 40) {
-      const idx = c.d.memories.findIndex((m) => m.weight <= 1);
-      c.d.memories.splice(idx >= 0 ? idx : 0, 1);
+    this.mem.add(c, text, weight);
+  }
+
+  /** 让 AI 给家具填标签，返回填好了几件 */
+  async tagFurniture(defs: FurnitureDef[]): Promise<number> {
+    if (!this.llm) return 0;
+    let n = 0;
+    for (let i = 0; i < defs.length; i += 25) {
+      const batch = defs.slice(i, i + 25);
+      try {
+        const raw = await this.llm.complete({
+          tier: "fast",
+          system: `你在给生活模拟游戏里的家具贴标签。每件家具从给定的标签里选 3～6 个最贴切的（风格、用途、感觉、材质、颜色等），只能用列表里的标签，原样照抄。`,
+          schema: { type: "object", additionalProperties: false, properties: { items: { type: "array", items: { type: "object", additionalProperties: false, properties: { id: { type: "string" }, tags: { type: "array", items: { type: "string" } } }, required: ["id", "tags"] } } }, required: ["items"] },
+          messages: [{ role: "user", content: `可用的标签：${FURNITURE_TAGS.join("、")}\n\n家具（id=名称｜分类｜能做的事）：\n${batch.map((d) => `${d.id}=${d.name}｜${d.category}｜${d.interactions.map((x) => x.name).join("、") || "装饰"}`).join("\n")}` }],
+        }) as { items?: { id: string; tags: string[] }[] };
+        for (const it of raw.items ?? []) {
+          if (!batch.some((d) => d.id === it.id) || !Array.isArray(it.tags)) continue;
+          setFurnitureTags(it.id, it.tags);
+          if (FURNITURE_BY_ID[it.id]?.tags?.length) n++;
+        }
+      } catch (e) { this.handleError(e); break; }
     }
+    return n;
   }
 
   /** 主人和角色聊天 */
@@ -263,7 +291,7 @@ export class Brain {
       system: CHARACTER_SYSTEM,
       maxTokens: 4000,
       schema: CHARACTER_SCHEMA,
-      messages: [{ role: "user", content: `玩家想做的角色：${request}\n\n可选的食物 id：${foods}\n可选的家具 id：${furn}\n家里的房间：${rooms}` }],
+      messages: [{ role: "user", content: `玩家想做的角色：${request}\n\n可选的食物 id：${foods}\n可选的家具 id：${furn}\n家里的房间：${rooms}\n可选的家具标签：${FURNITURE_TAGS.join("、")}` }],
     });
   }
 
@@ -276,8 +304,9 @@ export class Brain {
       try {
         this.callTimes.push(Date.now());
         const history = c.d.chat.slice(-16);
+        const recalled = await this.mem.recall(c, [...c.d.chat.slice(-3).map((m) => m.text), text].join("\n"), 8).catch(() => []);
         const msgs: { role: "user" | "assistant"; content: string }[] = [
-          { role: "user", content: `（角色资料和当前处境，不是主人说的话）\n${buildContext(g, c, [])}` },
+          { role: "user", content: `（角色资料和当前处境，不是主人说的话）\n${buildContext(g, c, [], recalled)}` },
           { role: "assistant", content: "（我记住了，接下来用这个角色的身份和主人聊天。）" },
         ];
         for (const m of history) {
