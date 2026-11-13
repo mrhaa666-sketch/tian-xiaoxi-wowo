@@ -155,6 +155,14 @@ export class Character {
     }
     if (this.moving) d.skills.fitness = Math.min(10, d.skills.fitness + 0.0015 * m);
 
+    // —— 逗猫：开心、放松 ——
+    if (this.run?.phase === "act" && this.run.step.do === "pet") {
+      const fan = this.d.lore.likedTags.some((t) => t === "猫咪" || t === "动物") ? 1.5 : 1;
+      n.fun = clamp(n.fun + 1.0 * fan * m);
+      n.mood = clamp(n.mood + 0.15 * fan * m);
+      d.stress = Math.max(0, d.stress - 0.1 * m);
+    }
+
     // —— 和别人一起做事：不寂寞，更开心 ——
     const tg = togetherOf(this.game, this);
     if (tg && acting) {
@@ -334,6 +342,16 @@ export class Character {
         run.path = p;
         break;
       }
+      case "pet": {
+        const pet = this.game.petById(step.target ?? "");
+        if (!pet) return;
+        // 走到猫旁边那一格
+        let p: { x: number; y: number }[] | null = null;
+        for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]]) { p = pathTo(pet.tile.x + ox, pet.tile.y + oy); if (p) break; }
+        if (!p) return;
+        run.path = p;
+        break;
+      }
       case "wander": {
         // 多数时候去别的房间转转，偶尔在本屋里挪个地方；院子去得少一些
         const rooms = w.rooms().filter((r) => r !== this.room);
@@ -389,6 +407,7 @@ export class Character {
       case "talk": return `和${this.game.labelOf(step.target ?? "")}说话`;
       case "tell_player": return "找主人说话";
       case "wander": return "四处走走";
+      case "pet": return `${step.interaction === "feed" ? "喂" : "逗"}${this.game.petById(step.target ?? "")?.d.name ?? "猫"}`;
       case "idle": return "发呆";
       case "say": return "自言自语";
       default: return "发呆";
@@ -526,6 +545,18 @@ export class Character {
         this.pose = "stand";
         run.endsAt = now + secondsFor(clamp(step.minutes ?? 1, 0.2, 30)) * 1000;
         break;
+      case "pet": {
+        const pet = this.game.petById(step.target ?? "");
+        if (!pet) { run.endsAt = now; break; }
+        this.pose = "use";
+        const sx = pet.d.pos.x - this.d.pos.x;
+        if (Math.abs(sx) > 0.05) this.d.facing = sx > 0 ? 1 : -1;
+        if (step.interaction === "feed") { pet.fed(this); this.game.log("event", `${this.name}喂了${pet.d.name}`, this.id); }
+        else { pet.playedWith(this); this.game.log("event", `${this.name}在逗${pet.d.name}玩`, this.id); }
+        this.showEmote("🐱", 4);
+        run.endsAt = now + secondsFor(clamp(step.minutes ?? 8, 1, 30)) * 1000;
+        break;
+      }
       default:
         run.endsAt = now + 500;
     }

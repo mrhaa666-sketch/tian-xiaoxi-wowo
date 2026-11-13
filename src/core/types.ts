@@ -7,6 +7,18 @@ export interface Tile {
   room?: string; // 所属房间名，例如「卧室」
 }
 
+export interface PetData {
+  id: string;
+  name: string;
+  color: string;      // 毛色（见 sim/pets.ts）
+  pos: { x: number; y: number };
+  hunger: number;     // 0 = 饿坏了
+  state: "idle" | "nap" | "follow";
+  follow?: string;    // 正跟着谁
+  favorite?: string;  // 最喜欢谁（常陪它玩、喂它的人）
+  love?: Record<string, number>;
+}
+
 export interface Wall {
   kind: "wall" | "window" | "door";
   style: string;
@@ -39,6 +51,8 @@ export interface WorldData {
   walls: Record<string, Wall>; // key = "x,y,N" 或 "x,y,W"
   furniture: FurnitureInst[];
   foods: FoodItem[];
+  /** 家里养的宠物 */
+  pets?: PetData[];
   /** 房间归属：房间名 → 住在这里的角色 id（没写的房间是公共区域） */
   owners?: Record<string, string[]>;
 }
@@ -190,7 +204,7 @@ export interface ChatMsg {
 
 /** 计划里的一步。由 AI 或本地逻辑生成，由行为执行器执行。 */
 export interface PlanStep {
-  do: "goto" | "use" | "talk" | "say" | "tell_player" | "idle" | "wander" | "eat";
+  do: "goto" | "use" | "talk" | "say" | "tell_player" | "idle" | "wander" | "eat" | "pet";
   target?: string;      // 家具 uid、房间名、角色 id
   interaction?: string; // 家具交互 id
   minutes?: number;

@@ -10,7 +10,9 @@ import type { FurnitureInst } from "../core/types";
 import type { Character } from "../sim/character";
 import type { Game } from "../sim/game";
 import { FLOOR_BY, FOOD_COLORS } from "./palette";
-import { FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
+import { FLOORS, FURNITURE_BY_ID, WALL_STYLES } from "../world/catalog";
+import { PET_COLOR, type Pet } from "../sim/pets";
+const OUTDOOR_FLOORS = new Set(FLOORS.filter((f) => f.outdoor).map((f) => f.id));
 import { LEVEL_SPAN, footprint, key, levelOf } from "../world/world";
 import { ProceduralSkin, SpriteSkin, takeStale, type CharSkin } from "./charview";
 import { drawStandee } from "./standees";
@@ -65,6 +67,11 @@ export class Scene {
   private tint = new Graphics();
   // 一天里的光线：天空背景、整栋房子的调色、夜里的灯光
   private sky = new Graphics();
+  /** 室外地面上的积雪：下雪时慢慢变白，暖和了慢慢化掉 */
+  private snowG = new Graphics();
+  private snow = 0;
+  private snowDrawn = { level: -1, version: -1 };
+  private lastT = 0;
   private skyGrad: { key: string; g: FillGradient } | null = null;
   private stars: { x: number; y: number; r: number; p: number }[] = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random() * 0.75, r: 0.6 + Math.random() * 1.4, p: Math.random() * 6.28 }));
   private clouds: { x: number; y: number; s: number; v: number }[] = Array.from({ length: 5 }, () => ({ x: Math.random(), y: 0.08 + Math.random() * 0.35, s: 0.6 + Math.random() * 0.8, v: 0.004 + Math.random() * 0.006 }));
@@ -110,7 +117,7 @@ export class Scene {
     await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, 3), autoDensity: true });
     host.appendChild(this.app.canvas);
     this.objects.sortableChildren = true;
-    this.camera.addChild(this.floorLayer, this.objects, this.ghostG);
+    this.camera.addChild(this.floorLayer, this.snowG, this.objects, this.ghostG);
     this.zoom = Math.min(0.7, Math.max(0.35, this.app.screen.width / 1900));
     this.glow.blendMode = "add";
     this.app.stage.addChild(this.sky, this.camera, this.glow, this.tint, this.overlay);
@@ -667,6 +674,7 @@ export class Scene {
       skin.view.zIndex = z;
       this.updateBubble(c);
     }
+    this.drawPets(t);
     this.applyFocus();
     this.drawGhost();
     this.drawTint();
@@ -709,6 +717,8 @@ export class Scene {
       g.circle(x + 7, y - 5, 15).fill(skyAt);
     }
     this.drawWeather(g, t, W, H);
+    this.drawSeason(g, t, W, H);
+    this.updateSnow(t);
     // 白天的云慢慢飘
     if (dl.night < 0.5 && this.game.weather.kind !== "rain" && this.game.weather.kind !== "storm") for (const c of this.clouds) {
       const x = (((c.x + t * c.v * 0.1) % 1.3) - 0.15) * W, y = c.y * H, s = c.s * 34;
@@ -716,6 +726,93 @@ export class Scene {
       g.ellipse(x, y, s * 1.6, s * 0.6).fill({ color: 0xffffff, alpha: a });
       g.ellipse(x - s * 0.8, y + s * 0.15, s, s * 0.45).fill({ color: 0xffffff, alpha: a });
       g.ellipse(x + s * 0.9, y + s * 0.1, s * 1.1, s * 0.5).fill({ color: 0xffffff, alpha: a });
+    }
+  }
+
+  private updateSnow(t: number) {
+    const dt = Math.min(1, Math.max(0, t - this.lastT));
+    this.lastT = t;
+    const w = this.game.weather;
+    if (w.kind === "snow") this.snow = Math.min(1, this.snow + dt / 90);          // 一分半钟积满
+    else if (w.temp > 2) this.snow = Math.max(0, this.snow - dt / (w.temp > 8 ? 60 : 240)); // 暖和就化
+    const level = Math.round(this.snow * 20) / 20;
+    const world = this.game.world;
+    if (level === this.snowDrawn.level && world.version === this.snowDrawn.version) return;
+    this.snowDrawn = { level, version: world.version };
+    const g = this.snowG;
+    g.clear();
+    if (level <= 0) return;
+    for (const [k, tile] of Object.entries(world.data.tiles)) {
+      if (!OUTDOOR_FLOORS.has(tile.floor)) continue;
+      const [x, y] = k.split(",").map(Number);
+      const pts = [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)];
+      // 每格积雪厚薄有一点不一样，看起来自然一些
+      const n = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+      const a = Math.min(0.92, level * (0.75 + (n % 100) / 400));
+      g.poly(pts.flatMap((p) => [p.x, p.y])).fill({ color: 0xf6f9ff, alpha: a });
+    }
+  }
+
+  // ———————————————————— 宠物 ————————————————————
+  private petViews = new Map<string, { box: Container; g: Graphics; emote: Text; key: string }>();
+
+  private drawPets(t: number) {
+    const seen = new Set<string>();
+    const sw = this.app.screen.width, sh = this.app.screen.height;
+    for (const p of this.game.pets) {
+      seen.add(p.d.id);
+      let v = this.petViews.get(p.d.id);
+      if (!v) {
+        const box = new Container();
+        const g = new Graphics();
+        const emote = new Text({ resolution: TEXT_RES, text: "", style: { fontSize: 20, fontFamily: "sans-serif" } });
+        emote.anchor.set(0.5, 1);
+        box.addChild(g, emote);
+        this.objects.addChild(box);
+        v = { box, g, emote, key: "" };
+        this.petViews.set(p.d.id, v);
+      }
+      const sp = this.gridToScreen(p.d.pos.x, p.d.pos.y);
+      if (sp.x < -100 || sp.x > sw + 100 || sp.y < -100 || sp.y > sh + 100) { v.box.visible = false; continue; }
+      v.box.visible = true;
+      const s = toScreen(p.d.pos.x, p.d.pos.y);
+      v.box.position.set(s.x, s.y);
+      v.box.zIndex = p.d.pos.y * 10 + 0.1;
+      const step = p.moving ? Math.floor(t * 6) % 2 : 0;
+      const key = `${p.d.color}|${p.asleep ? "z" : p.moving ? "w" + step : "s"}|${p.facing}`;
+      if (key !== v.key) { v.key = key; drawCat(v.g, PET_COLOR[p.d.color] ?? PET_COLOR.orange, p.asleep ? "sleep" : p.moving ? "walk" : "sit", p.facing, step); }
+      v.emote.text = p.emote?.icon ?? (p.asleep ? "💤" : "");
+      v.emote.alpha = p.emote ? 1 : 0.6;
+      v.emote.position.set(0, p.asleep ? -26 : -50);
+    }
+    for (const [id, v] of this.petViews) if (!seen.has(id)) { v.box.destroy({ children: true }); this.petViews.delete(id); }
+  }
+
+  /** 点到的是不是宠物 */
+  pickPet(sx: number, sy: number) {
+    let best: { p: Pet; d: number } | null = null;
+    for (const p of this.game.pets) {
+      const q = this.gridToScreen(p.d.pos.x, p.d.pos.y);
+      const d = Math.hypot(sx - q.x, sy - (q.y - 18 * this.zoom));
+      if (d < 34 * this.zoom && (!best || d < best.d)) best = { p, d };
+    }
+    return best?.p ?? null;
+  }
+
+  /** 季节的小东西：春天飘樱花瓣，秋天飘落叶（晴天、多云时） */
+  private drawSeason(g: Graphics, t: number, W: number, H: number) {
+    const m = new Date().getMonth() + 1;
+    const kind = this.game.weather.kind;
+    if (kind !== "sunny" && kind !== "cloudy") return;
+    const spring = m >= 3 && m <= 5, autumn = m >= 9 && m <= 11;
+    if (!spring && !autumn) return;
+    for (let i = 0; i < 26; i++) {
+      const d = this.drops[i];
+      const y = ((d.y + t * 0.035 * d.v) % 1.1 - 0.05) * H;
+      const x = ((d.x + Math.sin(t * 0.6 + d.s * 9) * 0.04 + t * 0.01) % 1) * W;
+      const r = 3 + d.s * 3;
+      const color = spring ? (d.s > 0.5 ? 0xffc6d9 : 0xffe1ea) : (d.s > 0.5 ? 0xe8893c : 0xd9a441);
+      g.ellipse(x, y, r * 1.4, r * 0.8).fill({ color, alpha: 0.8 });
     }
   }
 
@@ -920,4 +1017,41 @@ export class Scene {
     const g = this.screenToGrid(sx, sy);
     return key(Math.floor(g.x), Math.floor(g.y));
   }
+}
+
+/** 画一只小猫（原点在脚底中间）：坐着、走路、蜷成一团睡觉 */
+function drawCat(g: Graphics, col: { body: number; patch?: number }, pose: "sit" | "walk" | "sleep", facing: 1 | -1, step: number) {
+  g.clear();
+  const line = { width: 2.5, color: 0x5a4a44, alpha: 0.85 };
+  const body = col.body, patch = col.patch, dark = shade(body, 0.82);
+  const f = facing;
+  g.ellipse(0, 2, 22, 6).fill({ color: 0x000000, alpha: 0.13 });
+  if (pose === "sleep") {
+    g.ellipse(0, -11, 22, 13).fill(body).stroke(line);
+    if (patch) g.ellipse(-8 * f, -15, 9, 6).fill(patch);
+    g.moveTo(-18 * f, -4).quadraticCurveTo(-2 * f, 2, 16 * f, -6).stroke({ width: 5, color: dark, cap: "round" });
+    g.circle(12 * f, -16, 10).fill(body).stroke(line);
+    g.poly([6 * f, -23, 9 * f, -32, 14 * f, -24]).fill(body).stroke(line);
+    g.poly([13 * f, -25, 19 * f, -31, 20 * f, -21]).fill(body).stroke(line);
+    g.moveTo(9 * f, -16).lineTo(12 * f, -15).moveTo(15 * f, -16).lineTo(18 * f, -15).stroke({ width: 1.6, color: 0x5a4a44 });
+    return;
+  }
+  const lift = pose === "walk" ? (step ? -2 : 0) : 0;
+  // 尾巴
+  g.moveTo(-12 * f, -10).quadraticCurveTo(-26 * f, -18, -20 * f, -34).stroke({ width: 5, color: dark, cap: "round" });
+  // 身体
+  g.ellipse(0, -14 + lift, 15, 13).fill(body).stroke(line);
+  if (patch) g.ellipse(-5 * f, -18 + lift, 7, 5).fill(patch);
+  // 腿
+  const legs = pose === "walk" ? (step ? [-8, 6] : [-4, 9]) : [-6, 6];
+  for (const x of legs) g.roundRect(x - 3, -6, 6, 7, 3).fill(body).stroke(line);
+  // 头
+  const hx = 7 * f, hy = -30 + lift;
+  g.poly([hx - 11, hy - 4, hx - 9, hy - 17, hx - 2, hy - 9]).fill(body).stroke(line);
+  g.poly([hx + 11, hy - 4, hx + 9, hy - 17, hx + 2, hy - 9]).fill(body).stroke(line);
+  g.circle(hx, hy, 12).fill(body).stroke(line);
+  if (patch) g.ellipse(hx - 5, hy - 5, 5, 4).fill(patch);
+  g.circle(hx - 4, hy, 1.8).fill(0x3a3036).circle(hx + 4, hy, 1.8).fill(0x3a3036);
+  g.moveTo(hx - 2, hy + 4).quadraticCurveTo(hx, hy + 6, hx + 2, hy + 4).stroke({ width: 1.4, color: 0x5a4a44 });
+  g.ellipse(hx - 7, hy + 3, 2.5, 1.5).fill({ color: 0xff9db5, alpha: 0.7 }).ellipse(hx + 7, hy + 3, 2.5, 1.5).fill({ color: 0xff9db5, alpha: 0.7 });
 }

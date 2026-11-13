@@ -9,6 +9,7 @@ import { defaultSettings, normalizeCharacter, sampleCharacters } from "./default
 import type { WeatherNow } from "../core/types";
 import { checkGroupRoutines, type Together } from "./together";
 import { checkRelEvents } from "./events";
+import { Pet, PET_COLOR, newPet } from "./pets";
 import { GIFT_BY_ID, giftScore, giftWord } from "../world/gifts";
 import { FEELING_CN, feeling, feltTemp, fetchForecast, roomTemps, seasonTemp, weatherFromSettings, weatherLine } from "./climate";
 
@@ -61,6 +62,8 @@ export class Game {
   onWeather?: () => void;
   /** 正在一起做事的人：角色 id → 那次活动 */
   together = new Map<string, Together>();
+  /** 家里的宠物 */
+  pets: Pet[] = [];
   /** 到了写日记的时候（由 AI 层接上：有 AI 就让 AI 写，没有就按今天的记录写） */
   onDiaryDue?: (c: Character, day: string) => void;
   /** 有人说了话（界面层用来朗读） */
@@ -75,6 +78,7 @@ export class Game {
     this.firedCues = save.firedCues;
     this.firedFestivals = save.firedFestivals;
     for (const d of save.characters) this.addCharacter(d, false);
+    for (const p of save.world.pets ?? []) this.pets.push(new Pet(p, this));
     this.catchUp(save.lastSeen);
     this.checkClock(true);
   }
@@ -179,6 +183,24 @@ export class Game {
   }
 
   byId(id: string) { return this.chars.find((c) => c.id === id); }
+  petById(id: string) { return this.pets.find((p) => p.d.id === id || p.d.name === id); }
+
+  /** 养一只宠物 */
+  adoptPet(name: string, color: string) {
+    const d = newPet(this, name, color);
+    (this.world.data.pets ??= []).push(d);
+    const p = new Pet(d, this);
+    this.pets.push(p);
+    this.log("player", `家里来了一只${PET_COLOR[color]?.name ?? "猫"}，叫「${d.name}」`);
+    for (const c of this.chars) this.emit(c, `主人领养了一只${PET_COLOR[color]?.name ?? "猫"}，叫「${d.name}」，以后住在家里。`, 2);
+    this.changed();
+    return p;
+  }
+  removePet(id: string) {
+    this.pets = this.pets.filter((p) => p.d.id !== id);
+    this.world.data.pets = (this.world.data.pets ?? []).filter((p) => p.id !== id);
+    this.changed();
+  }
 
   // ———————————————————— 房间归属 ————————————————————
 
@@ -461,7 +483,11 @@ export class Game {
     const w = this.world;
     const wanted = new Set<string>();
     if (festivals.includes("圣诞节")) wanted.add("christmas_tree");
-    if (festivals.some((f) => ["春节", "除夕", "元宵节"].includes(f))) wanted.add("red_lantern");
+    if (festivals.some((f) => ["春节", "除夕", "元宵节", "中秋节"].includes(f))) wanted.add("red_lantern");
+    if (festivals.includes("万圣节")) wanted.add("pumpkin");
+    // 有人过生日：摆一串气球
+    const md = dateKey(new Date()).slice(5);
+    if (this.chars.some((c) => c.d.profile.birthday === md)) wanted.add("balloons");
     let changed = false;
     for (const f of [...w.data.furniture]) {
       if (f.state?.festival && !wanted.has(f.def)) { w.removeFurniture(f.uid); changed = true; }
@@ -476,11 +502,11 @@ export class Game {
       if (w.data.furniture.some((f) => f.def === def && f.state?.festival)) continue;
       for (const [x, y] of tiles) {
         if (def === "red_lantern" && (w.wall(x, y, "N")?.kind !== "wall" || w.tile(x, y - 1))) continue;
-        if (def === "christmas_tree" && w.data.walls[`${x},${y},N`]?.kind === "door") continue;
+        if (def !== "red_lantern" && w.data.walls[`${x},${y},N`]?.kind === "door") continue;
         const f = w.addFurniture(def, x, y, 0);
         if (!f) continue;
         // 圣诞树不能挡住路
-        if (def === "christmas_tree" && !w.accessSpots(f).length) { w.removeFurniture(f.uid); continue; }
+        if ((def === "christmas_tree" || def === "pumpkin" || def === "balloons") && !w.accessSpots(f).length) { w.removeFurniture(f.uid); continue; }
         f.state = { ...f.state, festival: true };
         changed = true;
         break;
@@ -547,6 +573,7 @@ export class Game {
 
   tick(dt: number) {
     for (const c of this.chars) c.update(dt);
+    for (const p of this.pets) p.update(dt);
     this.clockAcc += dt;
     if (this.clockAcc >= 20) {
       this.clockAcc = 0;

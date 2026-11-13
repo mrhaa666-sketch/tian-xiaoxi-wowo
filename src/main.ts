@@ -416,6 +416,14 @@ async function boot() {
       return;
     }
     const c = scene.pickCharacter(p.x, p.y);
+    // 点到猫：蹭你一下
+    const pet = !c && !ui.build.on ? scene.pickPet(p.x, p.y) : null;
+    if (pet) {
+      pet.showEmote(pet.asleep ? "💤" : "💕", 3);
+      ui.flash(pet.asleep ? `${pet.d.name}睡得正香，轻轻摸了摸它` : pet.d.hunger < 40 ? `${pet.d.name}喵喵叫，好像饿了` : `${pet.d.name}蹭了蹭你的手`);
+      navigator.vibrate?.(8);
+      return;
+    }
     // 手机上双击空地：进入那个房间（电脑上有 dblclick）
     if (!c && e.pointerType === "touch") {
       const now = performance.now();

@@ -8,12 +8,13 @@ import type { Game, GameEvent } from "../sim/game";
 import type { Memory } from "../core/types";
 import { FEELING_CN, feeling, weatherLine } from "../sim/climate";
 import { togetherOf } from "../sim/together";
+import { PET_COLOR } from "../sim/pets";
 
 const STEP_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    do: { type: "string", enum: ["goto", "use", "eat", "talk", "say", "tell_player", "idle", "wander"] },
+    do: { type: "string", enum: ["goto", "use", "eat", "talk", "say", "tell_player", "idle", "wander", "pet"] },
     target: { type: "string" },
     interaction: { type: "string" },
     minutes: { type: "number" },
@@ -72,6 +73,7 @@ const ACTIONS_DOC = `计划里每一步的 do 只能是：
 - tell_player：主动对主人说话（会出现在主人的聊天框里）。line 填内容。
 - idle：原地发呆。minutes 填分钟。
 - wander：随便走走。
+- pet：去逗宠物或者喂宠物。target 填宠物 id，interaction 填 play（逗它玩）或 feed（喂它）。
 不用的字段填空字符串，minutes 不用时填 0。`;
 
 export const DECISION_SYSTEM = `你是生活模拟游戏「恬小溪窝窝」里一个角色的大脑。主人（玩家）以上帝视角看着这个家。你每次收到角色当前的处境，决定 TA 此刻的想法、心情和接下来的 1～4 步行动。
@@ -243,6 +245,7 @@ export function buildContext(game: Game, c: Character, events: GameEvent[], reca
     frows.push(`- ${f.uid} | ${f.name} | ${f.room} | ${acts}${tg ? ` | ${tg}` : ""}${on}${occ ? ` | ${occ === c ? "你" : occ.name}正在用` : ""}${foods.length ? ` | 上面有：${foods.join("、")}` : ""}`);
   }
   lines.push(frows.join("\n"));
+  if (game.pets.length) lines.push(`【宠物】${game.pets.map((p) => `${p.d.name}（id: ${p.d.id}，${PET_COLOR[p.d.color]?.name ?? "猫"}）在${p.room}${p.asleep ? "睡觉" : p.d.state === "follow" ? `跟着${game.byId(p.d.follow ?? "")?.name ?? "人"}` : "溜达"}${p.d.hunger < 40 ? "，饿了" : ""}${p.d.favorite === c.id ? "，最喜欢你" : ""}`).join("；")}`);
   lines.push(`【房间】${game.world.rooms().map((r) => { const o = roomOwner(r); return o ? `${r}（${o}）` : r; }).join("、")}`);
 
   // 记忆：最重要的几条 + 最近的几条 + 和眼前的事有关的（从知识库里找出来的）

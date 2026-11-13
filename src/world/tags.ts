@@ -87,6 +87,8 @@ export const DEFAULT_TAGS: Record<string, string[]> = {
   wall_shelf: ["收纳", "木质", "简约"],
   curtain: ["温馨", "布艺", "浪漫"],
   red_lantern: ["节日", "中式", "热闹", "暖色调"],
+  pumpkin: ["节日", "热闹", "暖色调", "神秘"],
+  balloons: ["节日", "热闹", "彩色", "可爱"],
   stairs: ["木质", "宽敞"],
   heater: ["暖和", "温馨", "金属"],
   air_conditioner: ["凉快", "暖和", "电子产品", "现代"],

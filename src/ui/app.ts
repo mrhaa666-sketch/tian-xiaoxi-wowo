@@ -17,6 +17,7 @@ import { customFurniture, customRooms, exportFurniturePack, exportRoom, importHo
 import { TAG_GROUPS } from "../world/tags";
 import { GIFTS, GIFT_BY_ID } from "../world/gifts";
 import { stopSpeaking } from "../platform/voice";
+import { PET_COLOR, PET_COLORS } from "../sim/pets";
 import { applyPlan, planFromWorld, type Plan } from "../world/floorplan";
 import { Planner } from "./planner";
 import { scoreOptions } from "../sim/autonomy";
@@ -565,6 +566,39 @@ export class UI {
         await this.saveFile("家具包-自制家具.json", JSON.stringify(await exportFurniturePack(), null, 1)); this.flash("已导出自制家具");
       } }] : []),
     ], e.clientX - pr.left, e.clientY - pr.top + 40);
+  }
+
+  /** 宠物：领养、改名、看看它最喜欢谁 */
+  openPets() {
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>宠物</h2></header>
+      <div class="page-body" id="pt-body"></div>`);
+    const body = p.querySelector<HTMLElement>("#pt-body")!;
+    let color = "orange";
+    const render = () => {
+      const g = this.game;
+      body.innerHTML = `
+        ${g.pets.map((pt) => `<div class="row-item"><span><b>${esc(pt.d.name)}</b> <small>${PET_COLOR[pt.d.color]?.name ?? "猫"} · 在${esc(pt.room)}${pt.asleep ? "睡觉" : "溜达"} · ${pt.d.hunger < 40 ? "饿了" : "吃饱了"}${pt.d.favorite && g.byId(pt.d.favorite) ? ` · 最喜欢${esc(g.byId(pt.d.favorite)!.name)}` : ""}</small></span>
+          <span class="pack-row" style="margin:0;flex-wrap:nowrap"><button class="btn small" data-feed="${pt.d.id}">喂</button><button class="btn small" data-ren="${pt.d.id}">改名</button><button class="btn small danger" data-bye="${pt.d.id}">送走</button></span></div>`).join("") || `<div class="help">家里还没有宠物。养一只猫吧：它会自己溜达、找软的地方睡觉，家里的人会去喂它、逗它玩（喜欢猫的人更常去）。点一下画面里的猫可以摸摸它。</div>`}
+        ${g.pets.length < 3 ? `<h3 class="group">领养一只猫</h3>
+          <div class="field"><label for="pt-name">名字</label><input id="pt-name" placeholder="团子" maxlength="10" /></div>
+          <div class="taste">${PET_COLORS.map((c) => `<button type="button" class="taste-chip ${color === c.id ? "like" : ""}" data-col="${c.id}">${c.name}</button>`).join("")}</div>
+          <div class="pack-row"><button class="btn small primary" id="pt-adopt">领养</button></div>` : `<div class="help">最多养三只。</div>`}`;
+      body.querySelectorAll<HTMLElement>("[data-col]").forEach((b) => (b.onclick = () => { color = b.dataset.col!; const name = body.querySelector<HTMLInputElement>("#pt-name")?.value ?? ""; render(); const inp = body.querySelector<HTMLInputElement>("#pt-name"); if (inp) inp.value = name; }));
+      const ad = body.querySelector<HTMLElement>("#pt-adopt");
+      if (ad) ad.onclick = () => { const pt = g.adoptPet(body.querySelector<HTMLInputElement>("#pt-name")!.value.trim() || "团子", color); g.save(); this.flash(`${pt.d.name}来到家里了`); render(); };
+      body.querySelectorAll<HTMLElement>("[data-feed]").forEach((b) => (b.onclick = () => { const pt = g.petById(b.dataset.feed!); if (pt) { pt.d.hunger = 100; pt.showEmote("😋", 4); this.flash(`喂了${pt.d.name}`); render(); } }));
+      body.querySelectorAll<HTMLElement>("[data-ren]").forEach((b) => (b.onclick = () => {
+        const pt = g.petById(b.dataset.ren!);
+        const name = pt && prompt("新名字", pt.d.name);
+        if (pt && name?.trim()) { pt.d.name = name.trim().slice(0, 10); g.save(); render(); }
+      }));
+      body.querySelectorAll<HTMLElement>("[data-bye]").forEach((b) => (b.onclick = () => {
+        const pt = g.petById(b.dataset.bye!);
+        if (pt) this.confirm(`把${pt.d.name}送走？`, () => { g.removePet(pt.d.id); g.log("player", `把${pt.d.name}送到了新家`); g.save(); render(); });
+      }));
+    };
+    render();
   }
 
   /** 房间归属：每个房间是谁的（可以几个人合住），没分配的是公共区域。focus = 从某个角色那里打开 */
@@ -1201,7 +1235,7 @@ export class UI {
     }
     body.innerHTML = `<div class="sheet-head"><h2>建造</h2><button class="btn small primary" id="build-done">完成</button></div>
       <button class="plan-entry" id="open-plan"><span class="pe-ic">▦</span><span><b>户型设计（DIY 公寓）</b><small>在平面图上拼房间，一键生成整套房子</small></span></button>
-      <div class="pack-row"><button class="btn small" id="hp-owners">房间归属</button><button class="btn small" id="hp-import" title="导入家具包 / 房间包">导入</button><button class="btn small" id="hp-export" title="导出房间包 / 家具包">导出</button><button class="btn small" id="hp-manage" title="家具标签和自制内容">标签</button></div>
+      <div class="pack-row"><button class="btn small" id="hp-owners">房间归属</button><button class="btn small" id="hp-import" title="导入家具包 / 房间包">导入</button><button class="btn small" id="hp-export" title="导出房间包 / 家具包">导出</button><button class="btn small" id="hp-manage" title="家具标签和自制内容">标签</button><button class="btn small" id="hp-pets">宠物</button></div>
       <div class="chips-row tools">${tools.map(([k, n]) => `<button class="chip-btn ${b.tool === k ? "on" : ""}" data-tool="${k}">${n}</button>`).join("")}</div>
       ${opts}<p class="hint">${hint} 两指拖动画面、捏合缩放。</p>`;
     const on = (sel: string, fn: (el: HTMLElement) => void) => body.querySelectorAll<HTMLElement>(sel).forEach((x) => (x.onclick = () => { fn(x); this.renderBuild(); }));
@@ -1215,6 +1249,7 @@ export class UI {
     body.querySelector<HTMLElement>("#open-plan")!.onclick = () => this.openPlanner();
     body.querySelector<HTMLElement>("#hp-import")!.onclick = () => this.homeFile().click();
     body.querySelector<HTMLElement>("#hp-owners")!.onclick = () => this.openRoomOwners();
+    body.querySelector<HTMLElement>("#hp-pets")!.onclick = () => this.openPets();
     body.querySelector<HTMLElement>("#hp-export")!.onclick = (e) => this.homeExportMenu(e as MouseEvent);
     body.querySelector<HTMLElement>("#hp-manage")!.onclick = () => this.openHomeManager();
     const rn = body.querySelector<HTMLInputElement>("#room-name");

@@ -153,6 +153,14 @@ export function scoreOptions(game: Game, c: Character): Option[] {
     const s = Math.min(30, 100 - n.social) * urgency(n.social) * (0.5 + d.traits.extraversion / 100) * (1 + Math.max(0, d.relations[o.id]?.affinity ?? 0) / 100);
     if (s > 0.5) out.push({ step: { do: "talk", target: o.id, line: "" }, label: `找${o.name}聊天`, score: s, why: "想找人说话" });
   }
+  // 宠物：饿了去喂，闲着去逗；喜欢猫、喜欢动物的人更爱去
+  for (const p of game.pets) {
+    if (Math.floor((p.d.pos.y + 500) / 1000) !== Math.floor((c.d.pos.y + 500) / 1000)) continue;
+    const fan = d.lore.likedTags.some((t) => t === "猫咪" || t === "动物") ? 1.8 : d.lore.dislikedTags.some((t) => t === "猫咪" || t === "动物") ? 0.2 : 1;
+    const dist = Math.hypot(p.d.pos.x - c.d.pos.x, p.d.pos.y - c.d.pos.y);
+    if (p.d.hunger < 40) out.push({ step: { do: "pet", target: p.d.id, interaction: "feed", minutes: 3 }, label: `喂${p.d.name}`, score: (50 - p.d.hunger) * 3 * (0.5 + d.traits.agreeableness / 100) / (1 + dist * 0.05), why: `${p.d.name}饿了` });
+    if (!p.asleep) out.push({ step: { do: "pet", target: p.d.id, interaction: "play", minutes: 8 }, label: `逗${p.d.name}玩`, score: (100 - n.fun) * 0.9 * fan / (1 + dist * 0.06), why: fan > 1 ? "最喜欢猫了" : "无聊" });
+  }
   out.push({ step: { do: "wander" }, label: "四处走走", score: 2 + (n.comfort > 60 ? 1 : 0), why: "随便走走" });
   return out.sort((a, b) => b.score - a.score);
 }

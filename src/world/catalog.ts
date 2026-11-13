@@ -235,6 +235,8 @@ const EXTRA: Mini[] = [
   ["cat_tower", "猫爬架", 1, 1, 120, 0xd9b38c, "装饰"],
   ["fish_tank", "鱼缸", 1, 1, 60, 0x9fd8f0, "装饰", [{ id: "watch", name: "看鱼", pose: "stand", minutes: [3, 15], perMinute: { mood: 0.4 } }]],
   ["christmas_tree", "圣诞树", 1, 1, 140, 0x3f9a5a, "节日"],
+  ["pumpkin", "南瓜灯", 1, 1, 70, 0xf59a2e, "节日", [{ id: "watch", name: "看南瓜灯", pose: "stand", minutes: [2, 6], perMinute: { mood: 0.4, fun: 0.5 } }]],
+  ["balloons", "生日气球", 1, 1, 130, 0xff8fb1, "节日"],
   // 楼梯：放在楼下，走上去就到楼上同一个位置（楼上没有地板时会自动铺一小块楼梯口）
   ["stairs", "楼梯", 1, 2, 120, 0xb98b62, "楼梯", [], { stairs: true, walkable: true, icon: "梯" }],
   // 楼上的楼梯口（放楼梯时自动出现，走上去就下楼）

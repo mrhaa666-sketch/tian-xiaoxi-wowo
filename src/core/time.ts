@@ -48,6 +48,7 @@ export function festivalsOf(d: Date): string[] {
   const set = new Set<string>([...solar.getFestivals(), ...lunar.getFestivals()]);
   const jq = lunar.getJieQi();
   if (jq === "清明" || jq === "冬至") set.add(jq);
+  if (d.getMonth() === 9 && d.getDate() === 31) set.add("万圣节");
   // 除夕：农历腊月最后一天，库里一般已有，这里兜底
   const tomorrow = Lunar.fromDate(new Date(d.getTime() + 86400000));
   if (tomorrow.getMonth() === 1 && tomorrow.getDay() === 1) set.add("除夕");
@@ -68,6 +69,7 @@ export function festivalHint(name: string): string {
     情人节: "表达喜欢的日子",
     圣诞节: "交换礼物、装饰圣诞树",
     冬至: "吃饺子或汤圆",
+    万圣节: "南瓜灯、变装、「不给糖就捣蛋」",
   };
   return hints[name] ?? "一个特别的日子";
 }

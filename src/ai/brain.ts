@@ -204,7 +204,7 @@ export class Brain {
   }
 
   private sanitizeStep(s: Record<string, unknown>): PlanStep | null {
-    const kinds = ["goto", "use", "eat", "talk", "say", "tell_player", "idle", "wander"];
+    const kinds = ["goto", "use", "eat", "talk", "say", "tell_player", "idle", "wander", "pet"];
     const d = String(s.do ?? "");
     if (!kinds.includes(d)) return null;
     const step: PlanStep = { do: d as PlanStep["do"] };
@@ -223,6 +223,12 @@ export class Brain {
       step.interaction = it.id;
     }
     if (d === "talk" && !this.game.byId(target)) return null;
+    if (d === "pet") {
+      const p = this.game.petById(target);
+      if (!p) return null;
+      step.target = p.d.id;
+      step.interaction = s.interaction === "feed" ? "feed" : "play";
+    }
     if ((d === "say" || d === "tell_player" || d === "talk") && !line) return null;
     return step;
   }
