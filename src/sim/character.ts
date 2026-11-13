@@ -64,9 +64,13 @@ export class Character {
   }
 
   /** 用新计划替换当前计划。正在做的事会被打断。 */
-  setPlan(steps: PlanStep[], interrupt = true) {
+  /** 正在「闲逛」：两件事之间没事做，在公寓里随便走走（随时可以被新的决定打断） */
+  ambient = false;
+
+  setPlan(steps: PlanStep[], interrupt = true, ambient = false) {
     if (interrupt) this.stopCurrent();
     this.queue = steps.slice();
+    this.ambient = ambient;
   }
 
   stopCurrent() {
@@ -308,10 +312,18 @@ export class Character {
         break;
       }
       case "wander": {
-        const tile = w.randomTileIn(Math.random() < 0.7 ? this.room : undefined);
-        const p = tile ? pathTo(tile.x, tile.y) : null;
+        // 多数时候去别的房间转转，偶尔在本屋里挪个地方；院子去得少一些
+        const rooms = w.rooms().filter((r) => r !== this.room);
+        const outdoor = (r: string) => { const t = w.randomTileIn(r); return !!t && ["grass", "deck", "stone"].includes(w.tile(t.x, t.y)?.floor ?? ""); };
+        let target: string | undefined = this.room;
+        if (rooms.length && Math.random() < 0.7) {
+          const indoor = rooms.filter((r) => !outdoor(r));
+          target = (Math.random() < 0.8 && indoor.length ? indoor : rooms)[Math.floor(Math.random() * (Math.random() < 0.8 && indoor.length ? indoor : rooms).length)];
+        }
+        let p: { x: number; y: number }[] | null = null;
+        for (let i = 0; i < 4 && !p; i++) { const tile = w.randomTileIn(target); p = tile ? pathTo(tile.x, tile.y) : null; }
         if (!p) return;
-        run.path = p.slice(0, 12);
+        run.path = p.slice(0, 40);
         break;
       }
       case "talk": {
@@ -471,6 +483,12 @@ export class Character {
       case "tell_player":
         if (step.line) this.game.tellPlayer(this, step.line);
         run.endsAt = now + 3000;
+        break;
+      case "wander":
+        // 走到了：停一下，左右看看
+        this.pose = "stand";
+        if (Math.random() < 0.5) this.d.facing = this.d.facing > 0 ? -1 : 1;
+        run.endsAt = now + (2 + Math.random() * 4) * 1000;
         break;
       case "idle":
         this.pose = "stand";

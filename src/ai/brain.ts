@@ -54,17 +54,26 @@ export class Brain {
       const box = this.game.inbox.get(c.id) ?? [];
       const urgent = box.some((e) => e.priority >= 2);
       const last = this.lastDecision.get(c.id) ?? 0;
-      if (!c.idle) this.restUntil.delete(c.id);
+      // 闲逛不算「在做事」：它只是两件事之间的空档
+      const free = c.idle || c.ambient;
+      if (!free) this.restUntil.delete(c.id);
       else if (!this.restUntil.has(c.id)) {
-        const base = { slow: 28_000, normal: 14_000, fast: 4_000 }[c.pace];
+        const base = { slow: 45_000, normal: 28_000, fast: 8_000 }[c.pace];
         this.restUntil.set(c.id, now + base * (0.7 + Math.random() * 0.6));
       }
       const rested = now >= (this.restUntil.get(c.id) ?? 0);
+      // 还没想好下一件事：在公寓里走走（累了、生病时多半站着歇）
+      if (c.idle && !rested && !c.hidden && Date.now() >= c.forcedUntil) {
+        const stay = c.d.illness || c.d.needs.energy < 25 ? 0.85 : 0.35 - c.d.traits.extraversion / 400;
+        const left = (this.restUntil.get(c.id) ?? 0) - now;
+        if (left > 5_000 && Math.random() > stay) c.setPlan([{ do: "wander" }], false, true);
+        else c.setPlan([{ do: "idle", minutes: 0.05 + Math.random() * 0.08 }], false, true);
+      }
       const interval = this.game.settings.ai.decisionInterval * 1000;
       // 正在睡觉/工作这类长动作时，只有急事才会打断
       const busyLong = !!c.run && c.run.phase === "act" && c.run.endsAt - performance.now() > 30_000;
       if (Date.now() < c.forcedUntil && !urgent) continue;
-      const wantAI = urgent ? now - last > 3_000 : c.idle && rested && now - last > interval;
+      const wantAI = urgent ? now - last > 3_000 : free && rested && now - last > interval;
       if (wantAI && (!busyLong || box.some((e) => e.priority >= 3))) {
         if (this.canCall()) {
           void this.decide(c);
@@ -72,7 +81,7 @@ export class Brain {
         }
       }
       // 没有 AI 可用、或额度暂时用完时，闲下来就用本地规则安排
-      if (c.idle && (!this.llm || !this.canCall())) {
+      if (free && (!this.llm || !this.canCall())) {
         if (rested && now - last > 4_000) this.decideLocally(c);
       } else if (!this.llm && urgent && now - last > 3_500) {
         this.decideLocally(c);
