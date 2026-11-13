@@ -228,5 +228,5 @@ export async function initAndroid(game: Game, brain: Brain, ui: UI) {
     for (let t = 0; t < elapsed; t += 0.25) { game.tick(0.25); brain.tick(); }
     // 告诉后台小程序「应用还活着」，它就不用重复发消息
     if (now - beat > 5 * 60_000) { beat = now; void syncRunner("heartbeat"); }
-  }, 1000);
+  }, 5000); // 后台每 5 秒醒一次，一次补上这 5 秒（少唤醒 CPU，更省电）
 }

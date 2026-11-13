@@ -114,7 +114,7 @@ export class Scene {
   }
 
   async init(host: HTMLElement) {
-    await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, 3), autoDensity: true });
+    await this.app.init({ resizeTo: host, background: 0xeef1f6, antialias: true, resolution: Math.min(window.devicePixelRatio, this.game.settings.look.fps === "saver" ? 1.5 : 2), autoDensity: true });
     host.appendChild(this.app.canvas);
     this.objects.sortableChildren = true;
     this.camera.addChild(this.floorLayer, this.snowG, this.objects, this.ghostG);

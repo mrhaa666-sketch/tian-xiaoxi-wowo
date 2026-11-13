@@ -165,7 +165,7 @@ export function defaultSettings(): Settings {
     timeScale: 1,
     phone: { keepAlive: true, proactive: "normal", quietStart: 0, quietEnd: 8 },
     weather: { mode: "manual", manual: "sunny", manualTemp: 22 },
-    look: { palette: "pink", mode: "light", timeTint: false, names: "selected" },
+    look: { palette: "pink", mode: "light", timeTint: false, names: "selected", fps: "balanced" },
     wallMode: "cutaway",
   };
 }

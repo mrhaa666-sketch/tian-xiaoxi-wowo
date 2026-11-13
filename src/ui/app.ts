@@ -1632,6 +1632,9 @@ export class UI {
           <div class="palette-pick">${PALETTES.map(([id, name, c]) => `<button type="button" class="pal ${s.look.palette === id ? "on" : ""}" data-pal="${id}" style="--c:${c}" aria-label="${name}"><i></i><span>${name}</span></button>`).join("")}</div></div>
         <div class="field"><label for="s-mode">深色模式</label>
           <select id="s-mode">${[["light", "浅色"], ["dark", "深色"], ["system", "跟随手机系统"], ["time", "跟随时间（天黑后自动变深色）"]].map(([v, n]) => `<option value="${v}" ${s.look.mode === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div class="field"><label for="s-fps">画面流畅度</label>
+          <select id="s-fps">${[["smooth", "流畅（60 帧，最费电）"], ["balanced", "均衡（30 帧）"], ["saver", "省电（20 帧，画面清晰度也稍低）"]].map(([v, n]) => `<option value="${v}" ${(s.look.fps ?? "balanced") === v ? "selected" : ""}>${n}</option>`).join("")}</select>
+          <div class="help">一段时间不碰屏幕，帧率会自动再降一些；切到后台时画面完全停止，只在后台继续过日子。</div></div>
         <div class="field"><label for="s-names">画面上的名字</label>
           <select id="s-names">${[["none", "不显示"], ["selected", "只显示选中的人"], ["all", "全部显示（跟着画面一起缩放）"]].map(([v, n]) => `<option value="${v}" ${s.look.names === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <label class="switch"><input type="checkbox" id="s-tint" ${s.look.timeTint ? "checked" : ""} /><span>界面颜色跟着时间变化（清晨偏粉、傍晚偏橙、夜里偏蓝）</span></label>
@@ -1806,6 +1809,7 @@ export class UI {
       s.look.mode = $<HTMLSelectElement>("#s-mode").value as typeof s.look.mode;
       s.look.timeTint = $<HTMLInputElement>("#s-tint").checked;
       s.look.names = $<HTMLSelectElement>("#s-names").value as typeof s.look.names;
+      s.look.fps = $<HTMLSelectElement>("#s-fps").value as NonNullable<typeof s.look.fps>;
       const pal = p.querySelector<HTMLElement>(".pal.on")?.dataset.pal;
       if (pal) s.look.palette = pal as typeof s.look.palette;
       this.applyLook();

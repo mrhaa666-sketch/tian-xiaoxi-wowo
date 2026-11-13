@@ -66,7 +66,24 @@ async function boot() {
   // ———————————————————— 主循环 ————————————————————
   let last = performance.now();
   let uiAcc = 0;
+  // —— 省电：限制帧率；一段时间没碰屏幕再降一档；切到后台时停掉画面 ——
+  const FPS = { smooth: [60, 30], balanced: [30, 20], saver: [20, 12] } as const;
+  let lastTouch = performance.now();
+  for (const ev of ["pointerdown", "pointermove", "keydown"]) window.addEventListener(ev, () => { lastTouch = performance.now(); }, { passive: true, capture: true });
+  const applyFps = () => {
+    const [busy, idle] = FPS[game.settings.look.fps ?? "balanced"];
+    const want = performance.now() - lastTouch < 15_000 ? busy : idle;
+    if (scene.app.ticker.maxFPS !== want) scene.app.ticker.maxFPS = want;
+  };
+  applyFps();
+  setInterval(() => {
+    // 安卓上切到后台时网页还在跑（为了让角色继续生活），但画面没人看，不用画；后台的时间由 platform/android.ts 推进
+    if (!game.playerWatching && scene.app.ticker.started) scene.app.ticker.stop();
+    else if (game.playerWatching && !scene.app.ticker.started) { last = performance.now(); scene.app.ticker.start(); }
+    applyFps();
+  }, 1000);
   scene.app.ticker.add(() => {
+    if (!game.playerWatching) return;
     const now = performance.now();
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
@@ -93,14 +110,14 @@ async function boot() {
   });
 
   // ———————————————————— 存档 ————————————————————
-  setInterval(() => game.save(), 10_000);
+  setInterval(() => game.save(), 30_000);
   // 每天自动在本机留一份备份（启动一分钟后，以及之后每小时检查一次）
   setTimeout(() => void autoBackup(game.toSave()), 60_000);
   setInterval(() => void autoBackup(game.toSave()), 3600_000);
   document.addEventListener("visibilitychange", () => {
     game.playerWatching = document.visibilityState === "visible";
-    if (!game.playerWatching) game.save();
-    last = performance.now();
+    if (!game.playerWatching) { game.save(); scene.app.ticker.stop(); }
+    else { last = performance.now(); scene.app.ticker.start(); }
   });
   window.addEventListener("beforeunload", () => game.save());
 

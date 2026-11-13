@@ -326,6 +326,8 @@ export interface LookSettings {
   mode: "light" | "dark" | "system" | "time"; // time = 天黑后自动变深色
   timeTint: boolean;                          // 界面底色跟着清晨、白天、傍晚、夜晚微微变化
   names: "none" | "selected" | "all";         // 画面上角色脚下的名字
+  /** 画面帧率：smooth = 60，balanced = 30，saver = 20（一段时间没碰屏幕会再降一些） */
+  fps?: "smooth" | "balanced" | "saver";
 }
 
 /** 手机（安卓版）：后台常驻和主动发消息 */
