@@ -469,7 +469,7 @@ export class UI {
       return `<button class="person" data-id="${c.id}">${this.avatar(c.d, 48)}
         <div class="p-main"><div class="p-name">${esc(c.name)}${c.d.illness ? " 🤒" : ""}</div><div class="p-act">${esc(c.room)} · ${esc(c.d.activity)}</div><div class="minibars">${bars}</div></div></button>`;
     }).join("");
-    const local = this.localPacks.length ? `<h4 class="sec">本地角色包（packs 文件夹）</h4><div class="local-packs">${this.localPacks.map((x, i) => `<button class="btn small" data-local="${i}">＋ ${esc(x.name)}</button>`).join("")}</div>` : "";
+    const local = this.localPacks.length ? `<h4 class="sec">本地角色包（点开挑人）</h4><div class="local-packs">${this.localPacks.map((x, i) => `<button class="btn small" data-local="${i}">${esc(x.name)} ›</button>`).join("")}</div>` : "";
     body.innerHTML = `<div class="sheet-head"><h2>角色</h2><div class="head-btns"><button class="btn small" id="p-msg">发消息</button><button class="btn primary small" id="p-add">＋ 新角色</button></div></div><div class="people">${cards}</div>
       <div class="pack-row"><button class="btn small" id="p-import">导入角色包</button><button class="btn small" id="p-export">导出全部角色</button>
 </div>${local}`;
@@ -483,7 +483,7 @@ export class UI {
       try {
         const r = await fetch(`packs/${item.file}`);
         if (!r.ok) throw new Error(String(r.status));
-        this.applyPack(await r.json());
+        await this.applyPack(await r.json(), item.name);
       } catch { this.flash(`读取 ${item.file} 失败`); }
     }));
   }
@@ -497,7 +497,9 @@ export class UI {
       el.onchange = async () => {
         const f = el!.files?.[0];
         if (!f) return;
-        try { this.applyPack(JSON.parse(await f.text())); } catch { this.flash("这个文件不是有效的角色包（JSON 格式不对）"); }
+        let raw: unknown;
+        try { raw = JSON.parse(await f.text()); } catch { this.flash("这个文件不是有效的角色包（JSON 格式不对）"); return; }
+        await this.applyPack(raw, f.name.replace(/\.json$/i, ""));
         el!.value = "";
       };
       document.body.appendChild(el);
@@ -526,7 +528,7 @@ export class UI {
         this.game.changed();
         // 新家具没写标签：问要不要让 AI 填
         const untagged = customFurniture().filter((d) => r.furniture.includes(d.name) && !d.tags?.length);
-        const tail = untagged.length && this.game.settings.ai.provider !== "mock" ? `\n\n${untagged.map((d) => d.name).join("、")}还没有标签，可以在「管理自制」里让 AI 填。` : "";
+        const tail = untagged.length && this.game.settings.ai.provider !== "mock" ? `\n\n${untagged.map((d) => d.name).join("、")}还没有标签，可以在「建造 → 标签」里让 AI 填。` : "";
         if (r.problems.length || tail) this.confirm(`${msg ? `导入了 ${msg}` : "没有导入任何东西"}${r.problems.length ? `\n\n${r.problems.join("\n")}` : ""}${tail}`, () => {});
         else this.flash(`导入了 ${msg}`);
       };
@@ -602,7 +604,7 @@ export class UI {
         <div id="hm-tags"></div>
         <button class="btn small" id="hm-ai" ${this.game.settings.ai.provider === "mock" ? "disabled" : ""}>让 AI 给没有标签的家具填写</button>
         <h3 class="group">自制家具（${furn.length}）</h3>
-        ${furn.length ? furn.map((f) => `<div class="row-item"><span>${esc(f.name)} <small>${f.w}×${f.h} · ${esc(f.category)}</small></span><button class="btn small danger" data-delf="${f.id}">删除</button></div>`).join("") : `<div class="help">还没有。在「建造」里点「导入家具包 / 房间包」。</div>`}
+        ${furn.length ? furn.map((f) => `<div class="row-item"><span>${esc(f.name)} <small>${f.w}×${f.h} · ${esc(f.category)}</small></span><button class="btn small danger" data-delf="${f.id}">删除</button></div>`).join("") : `<div class="help">还没有。在「建造」里点「导入」。</div>`}
         <h3 class="group">自制房间（${rooms.length}）</h3>
         ${rooms.length ? rooms.map((r) => `<div class="row-item"><span>${esc(r.name)} <small>${r.w}×${r.h}</small></span><button class="btn small danger" data-delr="${r.id}">删除</button></div>`).join("") : `<div class="help">还没有。可以在「导出…」里把家里布置好的房间存成房间包，分享给别人。</div>`}`;
       const pick = body.querySelector<HTMLSelectElement>("#hm-pick")!;
@@ -651,7 +653,74 @@ export class UI {
   /** 导入成功后要做的事（比如关掉「创建新角色」页），用一次就清掉 */
   private afterImport: (() => void) | null = null;
 
-  private async applyPack(raw: unknown) {
+  /** 导入角色包：只有一个人就直接搬进来；有好几个人时打开挑选页，一个一个选 */
+  private async applyPack(raw: unknown, label = "角色包") {
+    const root = (raw ?? {}) as Record<string, unknown>;
+    const list: unknown[] = Array.isArray(root.characters) ? root.characters : Array.isArray(raw) ? raw : [];
+    if (list.length > 1) { this.openPackPicker(list, label); return; }
+    await this.importEntries(raw);
+  }
+
+  /** 角色包里有好几个人：每个人一张卡片，单独搬进来 */
+  private openPackPicker(list: unknown[], label: string) {
+    const after = this.afterImport;
+    this.afterImport = null;
+    const p = this.page(`
+      <header class="page-head"><button class="icon-btn" data-close aria-label="返回">${icon("back")}</button><h2>${esc(label)}</h2></header>
+      <div class="page-body"><div class="help">这个角色包里有 ${list.length} 个人。想让谁搬进来就点谁，可以以后再来接别人。</div><div class="pick-list" id="pk-list"></div>
+      <div class="pick-foot"><button class="btn small" id="pk-all">剩下的全部搬进来</button></div></div>`);
+    const box = p.querySelector<HTMLElement>("#pk-list")!;
+    const avatarOf = (e: Record<string, unknown>) => {
+      const s = e.sprites as string | { id?: string; files?: Record<string, string> } | undefined;
+      if (typeof s === "string") return spriteUrl(s, "avatar_normal.png");
+      const files = s?.files ?? {};
+      return files["avatar_normal.png"] ?? Object.entries(files).find(([k]) => k.startsWith("avatar_"))?.[1] ?? "";
+    };
+    const spriteIdOf = (e: Record<string, unknown>) => { const s = e.sprites as string | { id?: string } | undefined; return typeof s === "string" ? s : s?.id; };
+    const state = (e: Record<string, unknown>) => {
+      const name = String(e.name ?? "");
+      const same = this.game.chars.find((c) => c.name === name && (!spriteIdOf(e) || c.d.sprites === spriteIdOf(e)));
+      return same ? "home" : "new";
+    };
+    let first = true;
+    const render = () => {
+      box.innerHTML = list.map((item, i) => {
+        const e = (item ?? {}) as Record<string, unknown>;
+        const pr = (e.profile ?? {}) as Record<string, unknown>;
+        const img = avatarOf(e);
+        const home = state(e) === "home";
+        const sub = [pr.age ? `${pr.age} 岁` : "", typeof pr.job === "string" ? pr.job : ""].filter(Boolean).join(" · ");
+        const persona = typeof e.persona === "string" ? e.persona.replace(/\s+/g, " ").slice(0, 46) : "";
+        return `<div class="pick-card ${home ? "home" : ""}">
+          <span class="avatar img" style="--s:52px;--ring:${home ? "#5cc58a" : "transparent"};background:var(--soft)">${img ? `<img alt="" src="${esc(img)}" onerror="this.remove()">` : ""}</span>
+          <div class="pick-main"><b>${esc(String(e.name ?? "（没有名字）"))}</b>${sub ? `<small>${esc(sub)}</small>` : ""}${persona ? `<p>${esc(persona)}…</p>` : ""}</div>
+          ${home ? `<button class="btn small" data-upd="${i}">更新立绘</button>` : `<button class="btn small primary" data-add="${i}">搬进来</button>`}
+        </div>`;
+      }).join("");
+      const left = list.filter((x) => state((x ?? {}) as Record<string, unknown>) === "new").length;
+      const all = p.querySelector<HTMLButtonElement>("#pk-all")!;
+      all.hidden = left < 2;
+      all.textContent = `剩下的 ${left} 个人全部搬进来`;
+      box.querySelectorAll<HTMLButtonElement>("[data-add],[data-upd]").forEach((b) => (b.onclick = async () => {
+        b.disabled = true;
+        const i = Number(b.dataset.add ?? b.dataset.upd);
+        await this.importEntries({ characters: [list[i]] });
+        if (first && after && b.dataset.add) { first = false; after(); }
+        render();
+      }));
+    };
+    p.querySelector<HTMLElement>("#pk-all")!.onclick = () => {
+      const rest = list.filter((x) => state((x ?? {}) as Record<string, unknown>) === "new");
+      this.confirm(`把剩下的 ${rest.length} 个人一起搬进来？`, async () => {
+        await this.importEntries({ characters: rest });
+        if (first && after) { first = false; after(); }
+        render();
+      });
+    };
+    render();
+  }
+
+  private async importEntries(raw: unknown) {
     const { added, updated, problems } = await importPack(this.game, raw);
     if (updated.length) { this.renderAll(); this.game.save(); }
     if (added.length && this.afterImport) {
@@ -665,8 +734,10 @@ export class UI {
       this.renderRoster();
       this.game.save();
     }
-    const msg = [added.length ? `导入了 ${added.join("、")}` : "", updated.length ? `更新了 ${updated.join("、")} 的立绘` : ""].filter(Boolean).join("，") || "没有导入任何角色";
-    if (problems.length) this.confirm(`${msg}。\n\n${problems.join("\n")}`, () => {});
+    const msg = [added.length ? `${added.join("、")}搬进来了` : "", updated.length ? `更新了 ${updated.join("、")} 的立绘` : ""].filter(Boolean).join("，") || "没有导入任何角色";
+    // 「等某某搬进来以后关系会生效」这种提示，一个一个搬的时候很正常，不用弹窗
+    const real = problems.filter((x) => !x.includes("这条关系会自动生效"));
+    if (real.length) this.confirm(`${msg}。\n\n${real.join("\n")}`, () => {});
     else this.flash(msg);
   }
 
@@ -1110,7 +1181,7 @@ export class UI {
     }
     body.innerHTML = `<div class="sheet-head"><h2>建造</h2><button class="btn small primary" id="build-done">完成</button></div>
       <button class="plan-entry" id="open-plan"><span class="pe-ic">▦</span><span><b>户型设计（DIY 公寓）</b><small>在平面图上拼房间，一键生成整套房子</small></span></button>
-      <div class="pack-row"><button class="btn small" id="hp-owners">房间归属</button><button class="btn small" id="hp-import">导入家具包 / 房间包</button><button class="btn small" id="hp-export">导出…</button><button class="btn small" id="hp-manage">管理自制</button></div>
+      <div class="pack-row"><button class="btn small" id="hp-owners">房间归属</button><button class="btn small" id="hp-import" title="导入家具包 / 房间包">导入</button><button class="btn small" id="hp-export" title="导出房间包 / 家具包">导出</button><button class="btn small" id="hp-manage" title="家具标签和自制内容">标签</button></div>
       <div class="chips-row tools">${tools.map(([k, n]) => `<button class="chip-btn ${b.tool === k ? "on" : ""}" data-tool="${k}">${n}</button>`).join("")}</div>
       ${opts}<p class="hint">${hint} 两指拖动画面、捏合缩放。</p>`;
     const on = (sel: string, fn: (el: HTMLElement) => void) => body.querySelectorAll<HTMLElement>(sel).forEach((x) => (x.onclick = () => { fn(x); this.renderBuild(); }));
@@ -1247,7 +1318,7 @@ export class UI {
         ${c ? "" : `<div class="import-card">
           <div><b>已经有角色包了？</b><span>导入就能直接搬进来，设定和立绘都在里面。</span></div>
           <button type="button" class="btn primary" id="e-import">从角色包导入</button>
-          ${this.localPacks.length ? `<div class="local-packs">${this.localPacks.map((x, i) => `<button type="button" class="btn small" data-elocal="${i}">＋ ${esc(x.name)}</button>`).join("")}</div>` : ""}
+          ${this.localPacks.length ? `<div class="local-packs">${this.localPacks.map((x, i) => `<button type="button" class="btn small" data-elocal="${i}">${esc(x.name)} ›</button>`).join("")}</div>` : ""}
         </div>
         <div class="or-line"><span>或者自己做一个</span></div>`}
         <div class="look-card">
@@ -1336,7 +1407,7 @@ export class UI {
           const r = await fetch(`packs/${item.file}`);
           if (!r.ok) throw new Error(String(r.status));
           this.afterImport = () => p.close();
-          await this.applyPack(await r.json());
+          await this.applyPack(await r.json(), item.name);
         } catch { this.flash(`读取 ${item.file} 失败`); }
       }));
     }
