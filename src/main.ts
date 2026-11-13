@@ -111,7 +111,6 @@ async function boot() {
   let pressChar: Character | null = null; // 按下那一刻手指下的人（人在走动，等长按生效时可能已经走开了）
   const longPress = (sx: number, sy: number) => {
     pressTimer = null;
-    if (ui.build.on) return;
     const g = scene.screenToGrid(sx, sy);
     const c = pressChar ?? scene.pickCharacter(sx, sy);
     pressChar = null;
@@ -141,9 +140,10 @@ async function boot() {
       grab.c.d.pos = { x: p.x, y: p.y };
       return;
     }
-    if (Math.hypot(sx - grab.sx, sy - grab.sy) > 8) grab.moved = true;
     grab.x = Math.floor(g.x) - grab.offX;
     grab.y = Math.floor(g.y) - grab.offY;
+    // 手指抖一下不算拖：真的挪到别的格子才算
+    if (grab.x !== grab.f.x || grab.y !== grab.f.y) grab.moved = true;
     const f = grab.f;
     scene.ghost = { kind: "furniture", x: grab.x, y: grab.y, def: f.def, rot: f.rot, ok: game.world.canPlace(f.def, grab.x, grab.y, f.rot, f.uid) };
   };
@@ -196,8 +196,8 @@ async function boot() {
     scene.ghost = null;
     const f = gr.f;
     if (cancelled) return;
-    if (!gr.moved) { furnitureMenu(f, sx, sy); return; }
-    if (gr.x === f.x && gr.y === f.y) return;
+    // 没拖动，或者拖了一圈又放回原处：弹菜单（删除在这里）
+    if (!gr.moved || (gr.x === f.x && gr.y === f.y)) { furnitureMenu(f, sx, sy); return; }
     if (!w.canPlace(f.def, gr.x, gr.y, f.rot, f.uid)) { ui.flash("那里放不下"); return; }
     const occ = game.occupantOf(f.uid);
     if (occ) occ.setPlan([], true); // 正在用的人先停下
@@ -316,7 +316,7 @@ async function boot() {
     dragStart = { ...p, moved: false, button: e.button };
     cancelPress();
     if (e.button === 0) {
-      pressChar = ui.build.on ? null : scene.pickCharacter(p.x, p.y);
+      pressChar = scene.pickCharacter(p.x, p.y);
       pressTimer = setTimeout(() => longPress(p.x, p.y), 550);
     }
     if (ui.build.on && e.button === 0 && ui.build.tool === "floor") {
