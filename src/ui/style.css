@@ -476,3 +476,7 @@ html, body { overscroll-behavior: none; }
 .usage-today { padding: 10px 12px; border-radius: 12px; background: var(--card); font-size: 13px; margin-bottom: 6px; }
 .usage-days { display: grid; gap: 2px; font-size: 12px; color: var(--muted); margin-bottom: 8px; padding: 0 4px; }
 .usage-days > div { display: flex; justify-content: space-between; }
+
+.diary-entry { padding: 12px 14px; border-radius: 14px; background: var(--card); margin-bottom: 8px; }
+.diary-day { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.diary-entry p { margin: 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }

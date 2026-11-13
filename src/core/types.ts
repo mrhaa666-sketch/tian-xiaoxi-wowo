@@ -223,6 +223,8 @@ export interface CharacterData {
   today: DayStats;
   illness?: Illness;
   memories: Memory[];
+  /** 日记：每天睡前写一篇 */
+  diary?: { day: string; text: string; t: number }[];
   relations: Record<string, Relation>; // key 为角色 id，"player" 为主人
   chat: ChatMsg[]; // 与主人的聊天记录
   // 运行时状态（也会存档，方便恢复）

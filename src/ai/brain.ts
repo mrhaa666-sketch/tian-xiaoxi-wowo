@@ -12,6 +12,8 @@ import { FOODS, FURNITURE } from "../world/catalog";
 import { AIError, makeLLM, type LLM } from "./provider";
 import { dlog } from "../core/log";
 import { MemoryBank } from "./memory";
+import { templateDiary } from "../sim/events";
+import { dateKey } from "../core/time";
 import { overLimit } from "./usage";
 import { FURNITURE_TAGS } from "../world/tags";
 import { setFurnitureTags } from "../world/homepack";
@@ -267,6 +269,34 @@ export class Brain {
 
   remember(c: Character, text: string, weight = 1) {
     this.mem.add(c, text, weight);
+  }
+
+  /** 写今天的日记：有 AI 就用角色的口吻写，没有就按今天的记录写一段 */
+  async writeDiary(c: Character, day: string) {
+    let text = "";
+    if (this.llm && Date.now() > this.pauseUntil && !this.limitReason()) {
+      try {
+        this.callTimes.push(Date.now());
+        const todays = this.game.logs.filter((l) => dateKey(new Date(l.t)) === day && (l.who === c.id || l.text.includes(c.name))).slice(-25)
+          .map((l) => `${new Date(l.t).getHours()}点 ${l.who ? (this.game.byId(l.who)?.name ?? "") : "主人"}：${l.text}`).join("\n");
+        const chat = c.d.chat.filter((m) => dateKey(new Date(m.t)) === day).slice(-10).map((m) => `${m.from === "player" ? "主人" : "我"}：${m.text}`).join("\n");
+        const raw = await this.llm.complete({
+          tier: "fast",
+          system: `你在替生活模拟游戏里的一个角色写今天的日记。完全用这个角色的口吻、自称和说话习惯写，第一人称，口语化，写真实的小事和心情，不要写成流水账，也不要编造今天没发生的大事。80～180 字，简体中文。`,
+          schema: { type: "object", additionalProperties: false, properties: { diary: { type: "string" } }, required: ["diary"] },
+          messages: [{ role: "user", content: `${buildContext(this.game, c, [])}\n\n【今天（${day}）发生的事】\n${todays || "（没什么特别的）"}\n\n【今天和主人的聊天】\n${chat || "（没聊）"}\n\n写今天的日记。` }],
+        }) as { diary?: string };
+        text = String(raw.diary ?? "").trim().slice(0, 600);
+      } catch (e) { this.handleError(e); }
+    }
+    if (!text) text = templateDiary(this.game, c, day);
+    const list = (c.d.diary ??= []);
+    list.push({ day, text, t: Date.now() });
+    if (list.length > 120) list.splice(0, list.length - 120);
+    // 日记也进长期记忆，以后聊到相关的事能想起来
+    this.mem.add(c, `（${day} 的日记）${text}`, 1);
+    this.game.log("event", `${c.name}写了今天的日记`, c.id);
+    this.game.changed();
   }
 
   /** 让 AI 给家具填标签，返回填好了几件 */

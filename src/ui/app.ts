@@ -80,7 +80,7 @@ export class UI {
   root: HTMLElement;
   stage: HTMLElement;
   selected: string | null = null;
-  tab: "status" | "profile" | "relations" | "memory" = "status";
+  tab: "status" | "profile" | "relations" | "memory" | "diary" = "status";
   build: BuildState = { on: false, tool: "furniture", floor: "wood", wallStyle: "cream", furniture: "sofa", room: "bedroom", roomName: "新房间", rot: 0, autoWalls: true };
   furnCat = "卧室";
   sheet: Sheet = null;
@@ -783,7 +783,7 @@ export class UI {
       if (th) th.textContent = c.d.thought || "……";
       return;
     }
-    const tabs = [["status", "状态"], ["profile", "档案"], ["relations", "关系"], ["memory", "记忆"]] as const;
+    const tabs = [["status", "状态"], ["profile", "档案"], ["relations", "关系"], ["diary", "日记"], ["memory", "记忆"]] as const;
     body.innerHTML = `
       <div class="d-head">${this.avatar(c.d, 52)}
         <div class="d-title"><h2>${esc(c.name)}</h2><div class="sub" id="head-sub"></div></div>
@@ -824,6 +824,11 @@ export class UI {
         return `<div class="row-item"><div class="ri-top"><b>${esc(who)}</b><span class="aff ${cls}">好感 ${Math.round(r.affinity)}</span></div><small>${esc(r.note || "")}</small></div>`;
       }).join("");
       tb.innerHTML = rows || `<p class="empty">还没有认识的人。</p>`;
+    } else if (this.tab === "diary") {
+      const list = (c.d.diary ?? []).slice().reverse();
+      tb.innerHTML = list.length
+        ? list.map((e) => `<div class="diary-entry"><div class="diary-day">${esc(e.day.replace(/^(\d+)-(\d+)-(\d+)$/, (_m, y, mo, d) => `${y} 年 ${Number(mo)} 月 ${Number(d)} 日`))}</div><p>${esc(e.text)}</p></div>`).join("")
+        : `<p class="empty">${esc(c.name)}每天晚上睡前会写一篇日记，明天早上来看看吧。</p>`;
     } else {
       this.renderMemoryTab(c, tb);
     }

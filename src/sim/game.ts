@@ -8,6 +8,7 @@ import { Character, clamp } from "./character";
 import { defaultSettings, normalizeCharacter, sampleCharacters } from "./defaults";
 import type { WeatherNow } from "../core/types";
 import { checkGroupRoutines, type Together } from "./together";
+import { checkRelEvents } from "./events";
 import { FEELING_CN, feeling, feltTemp, fetchForecast, roomTemps, seasonTemp, weatherFromSettings, weatherLine } from "./climate";
 
 const SAVE_KEY = "wowo-save-v1";
@@ -59,6 +60,8 @@ export class Game {
   onWeather?: () => void;
   /** 正在一起做事的人：角色 id → 那次活动 */
   together = new Map<string, Together>();
+  /** 到了写日记的时候（由 AI 层接上：有 AI 就让 AI 写，没有就按今天的记录写） */
+  onDiaryDue?: (c: Character, day: string) => void;
 
   constructor(save: SaveData) {
     this.world = new World(save.world);
@@ -308,7 +311,8 @@ export class Game {
   }
 
   /** 把食物放到离角色最近的餐桌上；没有餐桌就直接递给角色 */
-  feed(c: Character, foodId: string) {
+  /** 给角色准备吃的。from 不写就是主人准备的，写了就是别的角色（比如照顾病人的人） */
+  feed(c: Character, foodId: string, from?: string) {
     const def = FOOD_BY_ID[foodId];
     if (!def) return;
     const tables = this.world.data.furniture.filter((f) => FURNITURE_BY_ID[f.def].interactions.some((i) => i.tags?.includes("eat")));
@@ -321,16 +325,16 @@ export class Game {
     if (best) {
       const t = this.world.getFurniture(best.uid)!;
       this.world.data.foods.push({ uid: uid("food"), kind: foodId, furniture: t.uid, x: t.x, y: t.y, forChar: c.id });
-      this.log("player", `给${c.name}准备了${def.name}，放在${this.world.roomOf(t.x, t.y)}的餐桌上`);
-      this.emit(c, `主人给你准备了${def.name}，放在${this.world.roomOf(t.x, t.y)}的餐桌上。`, 3);
+      this.log(from ? "event" : "player", `${from ?? ""}给${c.name}准备了${def.name}，放在${this.world.roomOf(t.x, t.y)}的餐桌上`);
+      this.emit(c, `${from ?? "主人"}给你准备了${def.name}，放在${this.world.roomOf(t.x, t.y)}的餐桌上。`, 3);
     } else {
       c.d.needs.hunger = clamp(c.d.needs.hunger + def.hunger);
       c.d.needs.mood = clamp(c.d.needs.mood + def.mood);
       c.showEmote("😋");
-      this.log("player", `直接喂${c.name}吃了${def.name}`);
-      this.emit(c, `主人直接喂你吃了${def.name}。`, 2);
+      this.log(from ? "event" : "player", `${from ?? ""}直接喂${c.name}吃了${def.name}`);
+      this.emit(c, `${from ?? "主人"}直接喂你吃了${def.name}。`, 2);
     }
-    const rel = c.d.relations.player;
+    const rel = from ? undefined : c.d.relations.player;
     if (rel) rel.affinity = clamp(rel.affinity + 2, -100, 100);
     this.changed();
   }
@@ -530,6 +534,7 @@ export class Game {
       this.checkPhone();
       this.checkCold();
       checkGroupRoutines(this, this.firedCues);
+      checkRelEvents(this, this.firedCues);
     }
     if (Date.now() - this.weatherAt > 30 * 60_000) void this.refreshWeather();
   }

@@ -57,6 +57,7 @@ async function boot() {
   // 安卓版：后台常驻、手机通知（网页版里什么都不做）
   void initAndroid(game, brain, ui);
   brain.onStatus = () => ui.renderTop();
+  game.onDiaryDue = (c, day) => { void brain.writeDiary(c, day); };
 
   // 日志和列表变化时节流刷新界面
   let dirty = false;
